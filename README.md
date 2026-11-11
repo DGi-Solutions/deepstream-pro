@@ -19,13 +19,18 @@ Das Projekt ist ein eigenständig weiterentwickelter, öffentlicher Fork von [Je
 
 - Separate App **DeepStream Pro** mit eigenem Profil und eigener App-Identität.
 - Native Videowiedergabe mit Qt WebEngine und libmpv.
-- Experimentelle AVFoundation-Ausgabe für Apples räumliche Mehrkanalwiedergabe; Stereo bleibt verfügbar.
+- **Spatial Audio für AirPods:** räumlicher Filmton mit den macOS-Modi „Fixed“ und „Head Tracked“; derzeit experimentell.
 - Automatische Tonspurauswahl anhand der verfügbaren Decoder, in der gewählten Sprache.
 - Anzeige von Decoder, Audiotreiber, Kanalzahl, PCM-Format und Abtastrate.
 - Korrigierte Trailer-Ansteuerung und native Paketierung.
-- Eigenes Erscheinungsbild in Schwarz und Gold, mit DGi Solutions als Absender.
 
-Filmwiedergabe und Trailer wurden auf dem Mac geprüft. Mit erzeugten Testdateien bestehen TrueHD, Dolby Digital Plus, Dolby Digital, DTS, FLAC, ALAC, AAC und PCM über AVFoundation sowie Pause, Spulen und Spurwechsel. Atmos- und DTS:X-Objektwiedergabe sind damit noch nicht bestätigt.
+Filmwiedergabe, Trailer, Pause, Spulen und Tonspurwechsel wurden auf dem Mac geprüft. Audiotests über AVFoundation bestehen für TrueHD, Dolby Digital Plus, Dolby Digital, DTS, FLAC, ALAC, AAC und PCM.
+
+## Spatial Audio
+
+DeepStream Pro gibt Mehrkanalton über AVFoundation an macOS weiter. Mit AirPods lässt sich der Ton räumlich wiedergeben: mit fester Ausrichtung über **Fixed** oder mit Kopfverfolgung über **Head Tracked**. Die Ausgabe lässt sich in den Audioeinstellungen einschalten.
+
+Die aktuelle Spatial-Audio-Ausgabe verwendet Mehrkanal-PCM. Die Verarbeitung von Atmos- und DTS:X-Objektdaten ist der nächste Schritt der Audio-Engine.
 
 ## In Entwicklung: DeepStream Audio Engine
 
