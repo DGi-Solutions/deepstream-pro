@@ -1,0 +1,30 @@
+name: Fehler in DeepStream Pro
+description: Ein Problem mit der macOS-Prüffassung melden.
+title: "[macOS] "
+body:
+  - type: markdown
+    attributes:
+      value: "Bitte keine Filme, Zugangsdaten, Session-URLs oder ungefilterten Logs veröffentlichen."
+  - type: input
+    id: version
+    attributes:
+      label: DeepStream-Pro-Version
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac und macOS-Version
+    validations:
+      required: true
+  - type: input
+    id: output
+    attributes:
+      label: Audioausgabe und Quellformat
+      description: "Zum Beispiel integrierte Lautsprecher, AirPods, USB-DAC oder HDMI; Quelle und Ausgabe bitte unterscheiden."
+  - type: textarea
+    id: steps
+    attributes:
+      label: Schritte und beobachtetes Ergebnis
+    validations:
+      required: true

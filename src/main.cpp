@@ -141,7 +141,7 @@ int main(int argc, char *argv[])
   try
   {
     QCommandLineParser parser;
-    parser.setApplicationDescription("Jellyfin Desktop");
+    parser.setApplicationDescription(Names::DataName());
     parser.addVersionOption();
     parser.addOptions({{{"h", "help"},              "Show this help"},
                        {{"l", "licenses"},          "Show license information"},
@@ -443,12 +443,12 @@ int main(int argc, char *argv[])
 
 #if defined(Q_OS_WIN) 
     // Setting window icon on OSX will break user ability to change it
-    app.setWindowIcon(QIcon(":/images/icon.png"));
+    app.setWindowIcon(QIcon(":/images/deepstream-pro.png"));
 #endif
 
 #if defined(Q_OS_LINUX) || defined(Q_OS_FREEBSD)
   	// Set window icon on Linux using system icon theme
-  	app.setWindowIcon(QIcon::fromTheme("org.jellyfin.JellyfinDesktop", QIcon(":/images/icon.png")));
+  	app.setWindowIcon(QIcon::fromTheme("org.jellyfin.JellyfinDesktop", QIcon(":/images/deepstream-pro.png")));
     // Set app id for Wayland compositor window icon
     app.setDesktopFileName("org.jellyfin.JellyfinDesktop");
 #endif

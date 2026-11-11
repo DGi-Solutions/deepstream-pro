@@ -9,7 +9,9 @@ set(DATA_NAME jellyfin-desktop)
 
 if(APPLE)
   set(MAIN_NAME "Jellyfin Desktop")
-  set(DATA_NAME "Jellyfin Desktop")
+  # Private spatial-audio build: keep its Qt settings/data separate from the
+  # regular installation without changing the application/output path.
+  set(DATA_NAME "DeepStream Pro")
 elseif(WIN32)
   set(MAIN_NAME "Jellyfin Desktop")
   set(DATA_NAME "Jellyfin Desktop")

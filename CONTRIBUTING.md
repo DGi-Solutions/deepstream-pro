@@ -1,77 +1,26 @@
-# Contributing to Jellyfin Desktop
+# An DeepStream Pro mitarbeiten
 
-## Running Tests
+DeepStream Pro ist ein macOS-Filmplayer von DGi Solutions und ein Fork von Jellyfin Desktop. Beiträge sollen nachvollziehbare Verbesserungen für Filmwiedergabe, Audioqualität, Bedienung und native Mac-Integration bringen.
 
-Jellyfin Desktop uses Qt Test for unit testing.
+## Fehler melden
 
-### Building Tests
+Bitte beschreibe macOS-Version, Mac-Architektur, DeepStream-Version, Ausgabegerät, Quellformat und die beobachteten Schritte. Bei Audiofehlern sind Quelle, tatsächliche PCM-Ausgabe und räumlicher Renderer getrennt zu benennen. Eine Atmos-Beschriftung der Quelle ist kein Messwert der Ausgabe.
 
-Tests are built automatically when you build the project:
+Veröffentliche keine Filme, vollständigen Serveradressen, Zugangsdaten, Session-URLs, privaten Profile oder ungefilterten Logs. Kleine synthetische oder rechtmäßig teilbare Testdateien sind vorzuziehen.
 
-```sh
-cmake -B build
-cmake --build build
-```
+## Änderungen vorbereiten
 
-### Running Tests
+- Eine begrenzte Aufgabe pro Branch; bestehende Änderungen erhalten.
+- Konkrete Fehler mit einer passenden Regression absichern.
+- Manuelle Tonspurwahl, Sprache, Untertitel und Bild-Ton-Synchronität erhalten.
+- Neue Abhängigkeiten samt Herkunft, Version und Lizenz dokumentieren.
+- Quellprüfungen und native Prüfungen passend zur Änderung ausführen und tatsächlich beobachtete Ergebnisse nennen.
+- Die ursprüngliche Jellyfin-App und deren Nutzerprofile unangetastet lassen.
 
-Run all tests using CTest:
+## Projektumfang
 
-```sh
-cd build
-ctest
-```
+Produktziel ist macOS. Im Fork erhaltene historische Plattformdateien des Upstreams bedeuten keine von DeepStream Pro angebotenen Builds oder unterstützten Produkte.
 
-Or run individual test executables directly:
+## Lizenz und Herkunft
 
-```sh
-cd build
-./tests/test_systemcomponent
-```
-
-### Writing Tests
-
-Tests are located in the `tests/` directory. To add a new test:
-
-1. Create a test file in `tests/` (e.g., `test_mycomponent.cpp`)
-2. Use `QTEST_APPLESS_MAIN` for headless unit tests
-3. Add the test to `tests/CMakeLists.txt`
-
-Example test structure:
-
-```cpp
-#include <QtTest/QtTest>
-#include "../src/mycomponent/MyComponent.h"
-
-class TestMyComponent : public QObject
-{
-  Q_OBJECT
-
-private slots:
-  void testMyFunction_data();
-  void testMyFunction();
-};
-
-void TestMyComponent::testMyFunction_data()
-{
-  QTest::addColumn<QString>("input");
-  QTest::addColumn<QString>("expected");
-
-  QTest::newRow("test case 1") << "input1" << "output1";
-  QTest::newRow("test case 2") << "input2" << "output2";
-}
-
-void TestMyComponent::testMyFunction()
-{
-  QFETCH(QString, input);
-  QFETCH(QString, expected);
-
-  QString result = MyComponent::myFunction(input);
-  QCOMPARE(result, expected);
-}
-
-QTEST_APPLESS_MAIN(TestMyComponent)
-#include "test_mycomponent.moc"
-```
-
-For more information on Qt Test, see the [Qt Test documentation](https://doc.qt.io/qt-6/qtest-overview.html).
+Die vorhandenen Lizenz- und Urheberhinweise erhalten. Geänderte Dateien müssen als Änderungen dieses Forks nachvollziehbar sein. Bitte keine fremden Markenassets oder nicht freigegebenen Medien hinzufügen.

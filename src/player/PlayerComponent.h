@@ -273,6 +273,10 @@ private:
   QSet<QString> m_audioDevices;
   bool m_streamSwitchImminent;
   bool m_doAc3Transcoding;
+#ifdef Q_OS_MAC
+  bool m_spatialAudioAO = false;
+  QString m_savedSpatialAudioAO;
+#endif
   QStringList m_passthroughCodecs;
   QVariantMap m_serverMediaInfo;
   QVariant m_currentSubtitleStream;

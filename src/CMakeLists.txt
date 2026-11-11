@@ -75,11 +75,16 @@ set_source_files_properties(${CMAKE_CURRENT_BINARY_DIR}/qrc_resources.cpp PROPER
 
 list(APPEND RESOURCE_FILES ${CMAKE_CURRENT_BINARY_DIR}/qrc_resources.cpp)
 
-set(MACOSX_BUNDLE_ICON_FILE jellyfin.icns)
+set(MACOSX_BUNDLE_ICON_FILE deepstream-pro.icns)
 set(MACOSX_BUNDLE_SHORT_VERSION_STRING ${VERSION_STRING})
-set(MACOSX_BUNDLE_BUNDLE_NAME "Jellyfin")
 set(MACOSX_BUNDLE_BUNDLE_VERSION ${VERSION_STRING})
-set(MACOSX_BUNDLE_GUI_IDENTIFIER org.jellyfin.JellyfinDesktop)
+if(APPLE)
+  set(MACOSX_BUNDLE_BUNDLE_NAME "DeepStream Pro")
+  set(MACOSX_BUNDLE_GUI_IDENTIFIER "local.dgi.DeepStreamPro")
+else()
+  set(MACOSX_BUNDLE_BUNDLE_NAME "Jellyfin")
+  set(MACOSX_BUNDLE_GUI_IDENTIFIER org.jellyfin.JellyfinDesktop)
+endif()
 
 if(APPLE)
   if(HAVE_UPDATER)

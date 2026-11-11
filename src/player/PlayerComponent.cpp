@@ -1234,7 +1234,56 @@ void PlayerComponent::setAudioConfiguration()
 {
   QString deviceType = SettingsComponent::Get().value(SETTINGS_SECTION_AUDIO, "devicetype").toString();
 
-  m_mpv->setProperty( "audio-exclusive", SettingsComponent::Get().value(SETTINGS_SECTION_AUDIO, "exclusive").toBool());
+  bool exclusive = SettingsComponent::Get().value(SETTINGS_SECTION_AUDIO, "exclusive").toBool();
+  m_mpv->setProperty( "audio-exclusive", exclusive);
+
+#ifdef Q_OS_MAC
+  // AVFoundation is opt-in and restricted to the automatic, non-passthrough
+  // configuration. setOtherConfiguration() runs afterwards, so a manual mpv
+  // "ao" setting still wins. Changing an AO can require an application restart.
+  QString configuredDevice = SettingsComponent::Get().value(SETTINGS_SECTION_AUDIO, "device").toString();
+  QString channels = SettingsComponent::Get().value(SETTINGS_SECTION_AUDIO, "channels").toString();
+  bool useSpatialAudio = SettingsComponent::Get().value(SETTINGS_SECTION_AUDIO, "spatialAudio").toBool() &&
+                         configuredDevice == "auto" && channels == "auto" &&
+                         deviceType == AUDIO_DEVICE_TYPE_BASIC && !exclusive;
+  if (useSpatialAudio && !m_spatialAudioAO)
+  {
+    // Preserve libmpv's actual value, including an empty default/autoprobe value.
+    char* previousAO = nullptr;
+    int result = mpv_get_property(m_mpv->mpv(), "ao", MPV_FORMAT_STRING, &previousAO);
+    if (result < 0)
+    {
+      qWarning() << "Could not read the current mpv audio output:" << mpv_error_string(result);
+    }
+    else
+    {
+      QString savedAO = QString::fromUtf8(previousAO ? previousAO : "");
+      mpv_free(previousAO);
+      // The trailing comma retains mpv's automatic probing fallback.
+      result = mpv_set_property_string(m_mpv->mpv(), "ao", "avfoundation,coreaudio,");
+      if (result < 0)
+        qWarning() << "Could not enable the spatial-audio output list:" << mpv_error_string(result);
+      else
+      {
+        m_savedSpatialAudioAO = savedAO;
+        m_spatialAudioAO = true;
+      }
+    }
+  }
+  else if (!useSpatialAudio && m_spatialAudioAO)
+  {
+    // On failure retain state and value so a later update can retry restoration.
+    QByteArray savedAO = m_savedSpatialAudioAO.toUtf8();
+    int result = mpv_set_property_string(m_mpv->mpv(), "ao", savedAO.constData());
+    if (result < 0)
+      qWarning() << "Could not restore the previous mpv audio output:" << mpv_error_string(result);
+    else
+    {
+      m_spatialAudioAO = false;
+      m_savedSpatialAudioAO.clear();
+    }
+  }
+#endif
 
   updateAudioDevice();
 

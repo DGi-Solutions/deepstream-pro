@@ -11,24 +11,46 @@ execute_process(
 set(brew_lib "${brew_prefix}/lib")
 set(brew_qt_lib "${brew_prefix}/opt/qt/lib")
 
+# MPV may live in an isolated SDK rather than the Homebrew prefix.
+get_filename_component(mpv_binary "@MPV_LIBRARY_mpv@" REALPATH)
+get_filename_component(mpv_lib "${mpv_binary}" DIRECTORY)
+# The install RPATH points only inside the bundle. Give macdeployqt the real
+# source of this non-Qt dependency before it rewrites the deployed reference.
+execute_process(
+  COMMAND install_name_tool -change "@rpath/libmpv.2.dylib" "${mpv_binary}"
+          "${app}/Contents/MacOS/@MAIN_NAME@"
+  RESULT_VARIABLE mpv_path_result
+)
+if(NOT mpv_path_result EQUAL 0)
+  message(FATAL_ERROR "Could not expose the MPV deployment source")
+endif()
+
 set(args ${app})
 list(APPEND args "-verbose=2")
 list(APPEND args "-qmldir=@SOURCE_ROOT@/src/ui")
 list(APPEND args "-libpath=@QTROOT@/lib")
+list(APPEND args "-libpath=${mpv_lib}")
 list(APPEND args "-libpath=${brew_qt_lib}")
 list(APPEND args "-libpath=${brew_lib}")
 foreach(BIN ${BINS})
   list(APPEND args "-executable=${app}/${BIN}")
 endforeach(BIN ${BINS})
 
-set(ENV{DYLD_LIBRARY_PATH} @QTROOT@/lib:${brew_qt_lib}:${brew_lib}:@DEPENDENCY_ROOT@/lib)
+set(ENV{DYLD_LIBRARY_PATH} ${mpv_lib}:@QTROOT@/lib:${brew_qt_lib}:${brew_lib}:@DEPENDENCY_ROOT@/lib)
 set(ENV{DYLD_FRAMEWORK_PATH} @QTROOT@/lib:${brew_qt_lib}:${brew_lib}:@DEPENDENCY_ROOT@/lib)
 
+file(REMOVE "${app}/Contents/Resources/qt.conf")
 execute_process(
-  COMMAND ${CMAKE_COMMAND} -E remove "${app}/Contents/Resources/qt.conf"
   COMMAND "@QTROOT@/bin/macdeployqt" ${args}
   WORKING_DIRECTORY "@QTROOT@/bin"
+  RESULT_VARIABLE deploy_result
 )
+if(NOT deploy_result EQUAL 0)
+  message(FATAL_ERROR "macdeployqt failed: ${deploy_result}")
+endif()
+if(NOT EXISTS "${framework_path}/libmpv.2.dylib")
+  message(FATAL_ERROR "The installed bundle is missing libmpv.2.dylib")
+endif()
 
 #
 # fix_install_names: Fix library paths for bundled dylibs/sos

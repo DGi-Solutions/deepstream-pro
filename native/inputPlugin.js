@@ -171,18 +171,25 @@ class inputPlugin {
                 if (!player) return;
 
                 const state = playbackManager.getPlayerState();
-                if (state && state.NowPlayingItem) {
-                    api.player.notifyMetadata(state.NowPlayingItem);
+                const item = state?.NowPlayingItem;
+                // Reviewed public PR 1314: without an ID, skip this entire block.
+                if (item?.Id) {
+                    try {
+                        api.player.notifyMetadata(item);
 
-                    const initialPos = playbackManager.currentTime();
-                    if (initialPos !== undefined && initialPos !== null) {
-                        api.player.notifyPosition(Math.floor(initialPos));
-                        lastReportedPosition = initialPos;
-                    }
+                        const initialPos = playbackManager.currentTime();
+                        if (initialPos !== undefined && initialPos !== null) {
+                            api.player.notifyPosition(Math.floor(initialPos));
+                            lastReportedPosition = initialPos;
+                        }
 
-                    if (player && typeof player.getVolume === 'function') {
-                        const volume = player.getVolume();
-                        api.player.notifyVolumeChange(volume / 100.0);
+                        if (typeof player.getVolume === 'function') {
+                            const volume = player.getVolume();
+                            api.player.notifyVolumeChange(volume / 100.0);
+                        }
+                    } catch (err) {
+                        // Native errors must not prevent event registration below.
+                        console.error('PlayerMedia: failed to update media metadata', err);
                     }
                 }
 

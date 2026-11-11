@@ -158,7 +158,11 @@ QString Paths::socketName(const QString& serverName)
   QString profileName = ProfileManager::activeProfile().name();
   if (profileName.isEmpty())
     profileName = "default";
+#ifdef Q_OS_MAC
+  QString socketFile = QString("deepstream-pro.%1.%2").arg(profileName, serverName);
+#else
   QString socketFile = QString("jellyfin-desktop.%1.%2").arg(profileName, serverName);
+#endif
 
 #ifdef Q_OS_UNIX
   QString runtimeDir = QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation);

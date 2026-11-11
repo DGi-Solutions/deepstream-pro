@@ -9,7 +9,7 @@ import Qt.labs.platform as Labs
 Window
 {
   id: mainWindow
-  title: "Jellyfin Desktop"
+  title: Qt.application.name === "DeepStream Pro" ? "DeepStream Pro" : "Jellyfin Desktop"
   objectName: "mainWindow"
   width: 1280
   height: 720
@@ -455,8 +455,8 @@ Window
 
   Labs.SystemTrayIcon {
     visible: showSystemTrayIcon
-    icon.source: "qrc:/images/icon.png"
-    tooltip: "Jellyfin Desktop"
+    icon.source: "qrc:/images/deepstream-pro.png"
+    tooltip: mainWindow.title
 
     onActivated: function(reason) {
       if (reason === Labs.SystemTrayIcon.Context) {

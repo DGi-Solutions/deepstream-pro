@@ -225,6 +225,13 @@
         "default": "auto"
       },
       {
+        "value": "spatialAudio",
+        "display_name": "Spatial Audio output (experimental)",
+        "help": "On macOS, prefer mpv's AVFoundation audio output with CoreAudio as fallback. Active only when Device is Auto, Channels is Auto, Device Type is Basic, and Exclusive is disabled. This does not guarantee Spatial Audio or preservation of Atmos/DTS:X object audio. A manual mpv ao option takes precedence. Restart the application after changing this setting; disable it and restart to return to the normal output selection.",
+        "default": false,
+        "platforms": [ "osx" ]
+      },
+      {
         "value": "normalize",
         "display_name": "Normalize",
         "help": "Enable audio volume normalization.",
@@ -476,7 +483,7 @@
       {
         "value": "ass_style_override",
         "display_name": "ASS Style Override",
-        "help": "Control whether user style overrides should be applied. Note that all of these overrides try to be somewhat smart about figuring out whether or not a subtitle is considered a \"sign\".\n\nNo:	Render subtitles as specified by the subtitle scripts, without overrides.\nYes:	Apply all the --sub-ass-* style override options. Changing the default for any of these options can lead to incorrect subtitle rendering (default).\nForce:	Like yes, but also force all --sub-* options. Can break rendering easily.\nScale:	Like yes, but also apply --sub-scale.\nStrip:	Radically strip all ASS tags and styles from the subtitle. This is equivalent to the old --no-ass / --no-sub-ass options.\n\nThis also controls some bitmap subtitle overrides, as well as HTML tags in formats like SRT, despite the name of the option.",
+        "help": "Control whether user style overrides should be applied. Note that all of these overrides try to be somewhat smart about figuring out whether or not a subtitle is considered a \"sign\".\n\nNo:\tRender subtitles as specified by the subtitle scripts, without overrides.\nYes:\tApply all the --sub-ass-* style override options. Changing the default for any of these options can lead to incorrect subtitle rendering (default).\nForce:\tLike yes, but also force all --sub-* options. Can break rendering easily.\nScale:\tLike yes, but also apply --sub-scale.\nStrip:\tRadically strip all ASS tags and styles from the subtitle. This is equivalent to the old --no-ass / --no-sub-ass options.\n\nThis also controls some bitmap subtitle overrides, as well as HTML tags in formats like SRT, despite the name of the option.",
         "default": "",
         "possible_values": [
           [ "", "Default" ],
