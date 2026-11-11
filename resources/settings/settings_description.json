@@ -225,6 +225,13 @@
         "default": "auto"
       },
       {
+        "value": "streamSelection",
+        "display_name": "Tonspurauswahl",
+        "help": "Automatisch wählt eine passende Tonspur in der gewählten Sprache. Eine manuelle Wahl während des Films bleibt erhalten.",
+        "default": "auto",
+        "possible_values": [ [ "auto", "Automatisch" ], [ "manual", "Manuell" ] ]
+      },
+      {
         "value": "spatialAudio",
         "display_name": "Spatial Audio output (experimental)",
         "help": "On macOS, prefer mpv's AVFoundation audio output with CoreAudio as fallback. Active only when Device is Auto, Channels is Auto, Device Type is Basic, and Exclusive is disabled. This does not guarantee Spatial Audio or preservation of Atmos/DTS:X object audio. A manual mpv ao option takes precedence. Restart the application after changing this setting; disable it and restart to return to the normal output selection.",

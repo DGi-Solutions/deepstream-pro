@@ -306,7 +306,36 @@
         /**
          * @private
          */
-        setCurrentSrc(elem, options) {
+        async readAudioPlayerInfo(method) {
+            const native = window.api?.player;
+            if (!native || typeof native[method] !== 'function') return {};
+            return await new Promise(resolve => {
+                let completed = false;
+                const finish = value => {
+                    if (completed) return;
+                    completed = true;
+                    clearTimeout(timer);
+                    resolve(value && typeof value === 'object' ? value : {});
+                };
+                const timer = setTimeout(() => finish({}), 1500);
+                try { native[method](finish); } catch (_) { finish({}); }
+            });
+        }
+
+        async setCurrentSrc(elem, options) {
+            const generation = (this._audioSelectionGeneration || 0) + 1;
+            this._audioSelectionGeneration = generation;
+            const capabilities = await this.readAudioPlayerInfo('getAudioCapabilities');
+            if (this._audioSelectionGeneration !== generation) return;
+            this._audioCapabilities = capabilities;
+            const engine = window.DeepStreamAudio;
+            this._audioPlan = engine ? engine.plan({
+                streams: options.mediaSource?.MediaStreams,
+                selectedIndex: options.mediaSource?.DefaultAudioStreamIndex,
+                mode: window.jmpInfo.settings?.audio?.streamSelection || 'auto',
+                playMethod: options.playMethod,
+                capabilities
+            }) : null;
             return new Promise((resolve) => {
                 const val = options.url;
                 this._currentSrc = val;
@@ -316,7 +345,9 @@
                 const ms = (options.playerStartPositionTicks || 0) / 10000;
                 this._currentPlayOptions = options;
                 this._subtitleTrackIndexToSetOnPlaying = options.mediaSource.DefaultSubtitleStreamIndex == null ? -1 : options.mediaSource.DefaultSubtitleStreamIndex;
-                this._audioTrackIndexToSetOnPlaying = options.mediaSource.DefaultAudioStreamIndex;
+                this._audioTrackIndexToSetOnPlaying = this._audioPlan
+                    ? this._audioPlan.selectedIndex : options.mediaSource.DefaultAudioStreamIndex;
+                options.mediaSource.DefaultAudioStreamIndex = this._audioTrackIndexToSetOnPlaying;
 
                 console.log('[MPV] Audio track index:', this._audioTrackIndexToSetOnPlaying);
                 console.log('[MPV] Subtitle track index:', this._subtitleTrackIndexToSetOnPlaying);
@@ -331,12 +362,12 @@
 
                 const streams = options.mediaSource?.MediaStreams || [];
 
-                // Handle audio. A server transcode carries only the selected
-                // audio stream, so it is always mpv track 1.
-                const isTranscode = options.playMethod === 'Transcode';
-                const audioRelIndex = !isTranscode && this._audioTrackIndexToSetOnPlaying != null && this._audioTrackIndexToSetOnPlaying >= 0
-                    ? this.getRelativeIndexByType(streams, this._audioTrackIndexToSetOnPlaying, 'Audio')
-                    : 1;
+                // Remuxed and transcoded output contains the server-selected
+                // track. Original stream indices only apply to DirectPlay.
+                const selectedAudio = this._audioTrackIndexToSetOnPlaying;
+                const audioRelIndex = selectedAudio === -1 ? -1
+                    : options.playMethod !== 'DirectPlay' || selectedAudio == null ? 1
+                    : this.getRelativeIndexByType(streams, selectedAudio, 'Audio') ?? 1;
 
                 // Handle subtitle - check for external first
                 let subtitleParam;
@@ -444,11 +475,16 @@
         setAudioStreamIndex(index) {
             console.log('[MPV] setAudioStreamIndex called with index:', index);
             this._audioTrackIndexToSetOnPlaying = index;
+            const engine = window.DeepStreamAudio;
+            if (engine) this._audioPlan = engine.plan({
+                streams: this._currentPlayOptions?.mediaSource?.MediaStreams,
+                selectedIndex: index, mode: 'manual', capabilities: this._audioCapabilities
+            });
 
             const playOptions = this._currentPlayOptions;
             const streams = playOptions?.mediaSource?.MediaStreams || [];
-            const isTranscode = playOptions?.playMethod === 'Transcode';
-            const relIndex = index < 0 ? -1 : (isTranscode ? 1 : this.getRelativeIndexByType(streams, index, 'Audio'));
+            const serverOutput = playOptions?.playMethod !== 'DirectPlay';
+            const relIndex = index < 0 ? -1 : (serverOutput ? 1 : this.getRelativeIndexByType(streams, index, 'Audio'));
             console.log('[MPV] Mapped audio index:', index, '->', relIndex);
             window.api.player.setAudioStream(relIndex != null ? relIndex : -1);
         }
@@ -466,6 +502,7 @@
         }
 
         stop(destroyPlayer) {
+            this._audioSelectionGeneration = (this._audioSelectionGeneration || 0) + 1;
             window.api.player.stop();
 
             this.onEndedInternal();
@@ -881,8 +918,20 @@
         };
         categories.push(audioCategory);
 
-        return Promise.resolve({
-            categories: categories
+        if (this._audioPlan?.source) {
+            audioCategory.stats.push({label: 'Gewählte Tonspur', value: this._audioPlan.source.label});
+            const selectionNames = {manual: 'Manuell', server_selected: 'Vom Server', capabilities_unknown: 'Unverändert (Decoder noch nicht bekannt)', no_supported_alternative: 'Unverändert (keine passende Alternative)'};
+            audioCategory.stats.push({label: 'Tonspurauswahl', value: selectionNames[this._audioPlan.reason] || 'Automatisch'});
+        }
+        return this.readAudioPlayerInfo('getAudioSignalPath').then(path => {
+            if (path.decoder) audioCategory.stats.push({label: 'Decoder', value: path.decoder});
+            if (path.outputDriver) audioCategory.stats.push({label: 'Audioausgang', value: path.outputDriver});
+            if (path.decoded?.['channel-count']) audioCategory.stats.push({label: 'Decodierte Kanäle', value: String(path.decoded['channel-count'])});
+            if (path.output?.['channel-count']) audioCategory.stats.push({label: 'Ausgabekanäle', value: String(path.output['channel-count'])});
+            if (path.output?.format) audioCategory.stats.push({label: 'Ausgabeformat', value: path.output.format});
+            if (path.output?.samplerate) audioCategory.stats.push({label: 'Abtastrate der Ausgabe', value: String(path.output.samplerate) + ' Hz'});
+            if (path.outputDriver) audioCategory.stats.push({label: 'Objektwiedergabe', value: path.objectRenderingConfirmed ? 'Bestätigt' : 'Nicht bestätigt'});
+            return {categories};
         });
     }
 

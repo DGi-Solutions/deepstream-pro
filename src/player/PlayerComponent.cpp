@@ -5,6 +5,7 @@
 #include <QCoreApplication>
 #include <QGuiApplication>
 #include <QDebug>
+#include <QSet>
 #include "display/DisplayComponent.h"
 #include "settings/SettingsComponent.h"
 #include "system/SystemComponent.h"
@@ -1075,6 +1076,62 @@ void PlayerComponent::setSubtitleStream(const QVariant &subtitleStream)
 {
   m_currentSubtitleStream = subtitleStream;
   reselectStream(m_currentSubtitleStream, MediaType::Subtitle);
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+QVariantMap PlayerComponent::getAudioCapabilities() const
+{
+  QVariantMap result;
+  result.insert("engine", "libmpv");
+  result.insert("decoderEnumerationAvailable", false);
+  result.insert("decoders", QStringList());
+  // The current libmpv PCM path does not expose a verified object renderer.
+  result.insert("objectAudioRoutes", QVariantList());
+  if (!m_mpv)
+    return result;
+
+  const QSet<QString> audioCodecs = {
+    "truehd", "mlp", "dts", "eac3", "ac3", "flac", "alac", "aac",
+    "mp3", "mp2", "opus", "vorbis", "wavpack", "ape", "tta",
+    "wmalossless", "wmapro", "wmav2"
+  };
+  QSet<QString> found;
+  const QVariantList decoderList = m_mpv->getProperty("decoder-list").toList();
+  for (const QVariant& value : decoderList)
+  {
+    const QString codec = value.toMap().value("codec").toString();
+    if (audioCodecs.contains(codec) || codec.startsWith("pcm_"))
+      found.insert(codec);
+  }
+  QStringList names = found.values();
+  names.sort();
+  result.insert("decoderEnumerationAvailable", !names.isEmpty());
+  result.insert("decoders", names);
+  return result;
+}
+
+///////////////////////////////////////////////////////////////////////////////////////////////////
+QVariantMap PlayerComponent::getAudioSignalPath() const
+{
+  QVariantMap result;
+  result.insert("engine", "libmpv");
+  result.insert("objectRenderingConfirmed", false);
+  if (!m_mpv)
+    return result;
+  result.insert("decoder", m_mpv->getProperty("audio-codec-name"));
+  result.insert("outputDriver", m_mpv->getProperty("current-ao"));
+  auto format = [this](const QString& property) {
+    const QVariantMap source = m_mpv->getProperty(property).toMap();
+    QVariantMap value;
+    for (const QString& key : {QStringLiteral("samplerate"), QStringLiteral("channel-count"),
+                              QStringLiteral("channels"), QStringLiteral("format")})
+      if (source.contains(key))
+        value.insert(key, source.value(key));
+    return value;
+  };
+  result.insert("decoded", format("audio-params"));
+  result.insert("output", format("audio-out-params"));
+  return result;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////

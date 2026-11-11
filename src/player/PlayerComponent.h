@@ -94,6 +94,8 @@ public:
   //      "description" -> QString  (human readable description intended for display)
   //
   Q_INVOKABLE virtual QVariant getAudioDeviceList();
+  Q_INVOKABLE QVariantMap getAudioCapabilities() const;
+  Q_INVOKABLE QVariantMap getAudioSignalPath() const;
   // Uses the "name" from the device list.
   Q_INVOKABLE virtual void setAudioDevice(const QString& name);
 

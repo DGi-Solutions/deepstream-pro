@@ -1,33 +1,29 @@
 # DeepStream Audio Engine
 
-## Ziel
+DeepStream Pro soll hochwertige Filmtonspuren auf dem Mac passend zum angeschlossenen Gerät wiedergeben. Die Engine verbindet Formaterkennung, Tonspurauswahl, Ausgabe und Diagnose. Die Quelle allein sagt noch nicht, was am Kopfhörer oder Verstärker ankommt.
 
-Ein integrierter, quell- und ausgabegerätegerechter Audioweg für Filme auf macOS. Hohe Quellauflösung allein ist kein Qualitätsnachweis. Die Engine soll möglichst wenige unnötige Veränderungen vornehmen und ihren tatsächlichen Ausgabepfad benennen.
+## Tonspurauswahl
 
-## Schichten
+Die Einstellung **Tonspurauswahl → Automatisch** gilt beim nächsten Filmstart. Die Engine liest die tatsächlich vorhandenen libmpv-Decoder aus. Eine Atmos- oder DTS:X-Route wird nur bevorzugt, wenn der Renderer ausdrücklich als verfügbar und metadatenerhaltend gemeldet wird. Der derzeitige libmpv-Weg meldet keine solche Route.
 
-1. Quellinformationen: Codec, Formatprofil, Sprache, Kanäle und räumliche Metadaten.
-2. Fähigkeiten: tatsächlich vorhandener Decoder/Renderer, Betriebssystem und Ausgabegerät.
-3. Auswahl: manuelle Entscheidung oder automatische Auswahl innerhalb der gewünschten Sprache.
-4. Wiedergabe: unveränderte Weitergabe, sofern unterstützt; sonst geeignete Dekodierung oder ein nachvollziehbarer Rückfall.
-5. Diagnose: Quelle, gewählter Decoder, PCM-Format, Renderer und bekannte Transportgrenzen getrennt anzeigen.
+Bei direkt abgespielten Originalquellen vergleicht die Engine interne Tonspuren derselben Sprache und Art. Hauptton, Kommentar, Audiodeskription und Hörgeschädigtenfassung werden getrennt behandelt. Anschließend zählen eine bestätigte Objektroute, Kanalzahl, verlustfreie Decodierung, Auflösung und Formatpräferenz. Die Bitrate wird erst nach dem Format verglichen. Ein freier Spurtitel gilt nicht als Atmos-Nachweis.
 
-## Formate
+Eine manuelle Auswahl bleibt für die laufende Wiedergabe erhalten. Bei einem vom Server umgewandelten oder neu verpackten Stream wird keine Spur aus der Originaldatei angewählt, die im gelieferten Stream fehlen könnte. „Ton aus“ bleibt ausgeschaltet. Wenn Decoderinformationen fehlen, bleibt die bereits gewählte Spur erhalten.
 
-Atmos kann mit unterschiedlichen Trägerformaten vorkommen, insbesondere TrueHD und Dolby Digital Plus/E-AC-3. DTS:X und DTS-HD sind ebenfalls zu unterscheiden. Unterstütztes Dekodieren des Grundformats bedeutet nicht automatisch Auswertung der Objektmetadaten.
+Erkannt werden unter anderem TrueHD/Atmos, E-AC-3/Atmos, DTS:X, DTS-HD MA/HRA, AC-3, DTS, FLAC, ALAC, PCM, AAC und Opus. Erkennung und Decoderverfügbarkeit sind keine Bestätigung der Objektwiedergabe. Laufzeitfehler einer beschädigten Datei werden weiterhin vom bestehenden Playerfehlerweg behandelt; ein automatischer Wechsel bei jedem Decoderfehler ist noch nicht umgesetzt.
 
-Die Automatik berücksichtigt TrueHD, DTS:X, DTS-HD MA/HRA, E-AC-3, AC-3, DTS, FLAC, ALAC, PCM, AAC und weitere tatsächlich verfügbare Decoder. Sie darf keine andere Sprache oder Kommentarspur allein für eine höhere Formatwertung wählen. Eine manuelle Wahl gilt für die laufende Wiedergabe.
+## Ausgabe
 
-## Aktueller und geplanter Weg
+Die experimentelle Spatial-Audio-Einstellung wählt bei Basic, automatischem Gerät, automatischen Kanälen und ausgeschaltetem Exklusivmodus AVFoundation. CoreAudio und die automatische Treibersuche bleiben als Rückfall erhalten. Manuelle mpv-Ausgabeeinstellungen haben Vorrang. Dieser Weg gibt decodiertes, kanalbasiertes PCM aus.
 
-Der aktuelle Player verwendet libmpv und kann auf macOS kanalbasiertes PCM über AVFoundation ausgeben. Der native Objekt-Audio-Weg ist ein gesonderter Entwicklungsschritt. Eine Quelle wird nur dann als objektbasiert wiedergegeben ausgewiesen, wenn der verwendete Renderer das tatsächlich leistet.
+Die Statistik zeigt die gewählte Quellspur sowie tatsächlichen Decoder, Audiotreiber, decodierte und ausgegebene Kanäle, PCM-Format und Abtastrate. Eine aktive Spatial-Audio-Option von macOS wird nicht als Nachweis verarbeiteter Atmos-Objekte ausgegeben.
 
-Apple AVFoundation, Apples Positional Audio Codec und aktuelle offene Decoder-/Rendererprojekte werden auf Eignung, Lizenzverträglichkeit und native Integration geprüft. Es ist noch keine dieser neuen Bibliotheken als Produktabhängigkeit aufgenommen.
+Klangbearbeitung und Downmix-Pegelbegrenzung bleiben eigene Einstellungen. Aus PCM-Abtastrate oder Wortbreite werden weder Bluetooth-Codec noch Verlustfreiheit der Funkübertragung abgeleitet.
 
-## Neutrale Wiedergabe
+## Nächster Schritt: Objektton
 
-Klangbearbeitung, Normalisierung, Lautheitsanpassung und räumliche Verarbeitung müssen bewusst wählbar und von unveränderter Weitergabe unterscheidbar sein. Für Bluetooth, USB und HDMI werden Fähigkeiten festgestellt; es werden weder Codec noch Verlustfreiheit aus einer angezeigten PCM-Abtastrate abgeleitet.
+E-AC-3 mit Atmos soll einen nativen Apple-Weg erhalten, der die räumlichen Metadaten verarbeitet. Für TrueHD/Atmos und DTS:X wird ein geeigneter Decoder mit Objektverarbeitung benötigt. Neue Komponenten werden erst nach Prüfung von Version, Lizenz, Synchronität und tatsächlichem Ausgabeweg eingebaut. Bisher wurde keine zusätzliche Bibliothek dafür aufgenommen.
 
 ## Prüfungen
 
-Formatwahl, Sprache, manuelle Auswahl, geordneter Rückfall und fehlerhafte Metadaten werden automatisiert geprüft. Native Abnahme umfasst Start, Pause, Seek, Bild-Ton-Synchronität, Gerätewechsel und die tatsächlich ausgegebenen Kanäle. Höreindrücke werden getrennt von technischen Messwerten dokumentiert.
+Die JavaScript-Tests prüfen Auswahlregeln und den echten Playeradapter. Die native Prüfung erzeugt eigene Testdateien für acht Codecs und prüft Decodierung, PCM-Ausgabe, Pause, Spulen und Spurwechsel. Sie prüft weder Objektton noch Bluetooth-Codec oder Höreindruck. Interaktive Filmwiedergabe, Gerätewechsel und Bild-Ton-Synchronität bleiben gesonderte Prüfungen.

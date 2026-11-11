@@ -5,7 +5,9 @@
 
 **Ein audiophiler Filmplayer für macOS – entwickelt von [DGi Solutions](https://dgi-solutions.de).**
 
-DeepStream Pro verbindet eine Jellyfin-Mediathek mit nativer Filmwiedergabe auf dem Mac. Unser Schwerpunkt ist Filmton: eine passende Ausgabe für das angeschlossene Gerät, möglichst wenig unnötige Signalverarbeitung und eine verständliche Anzeige des tatsächlichen Audiowegs.
+DeepStream Pro wird für Filmfreunde entwickelt, die hochwertige Tonspuren auf dem Mac nutzen wollen – mit Kopfhörern, AirPods, einem USB-DAC oder einer Heimkinoanlage. Die integrierte Audio-Engine soll Tonspur und Ausgabegerät aufeinander abstimmen und zeigen, wie der Ton tatsächlich wiedergegeben wird.
+
+Die heutige Prüffassung nutzt die Medienauswahl eines verbundenen Jellyfin-Servers. Das direkte Öffnen lokaler Filme oder von NAS-Freigaben ohne diesen Serverweg ist noch nicht als Nutzerablauf umgesetzt und geprüft.
 
 Das Projekt ist ein eigenständig weiterentwickelter, öffentlicher Fork von [Jellyfin Desktop](https://github.com/jellyfin/jellyfin-desktop). Es befindet sich in aktiver Entwicklung.
 
@@ -18,10 +20,12 @@ Das Projekt ist ein eigenständig weiterentwickelter, öffentlicher Fork von [Je
 - Separate App **DeepStream Pro** mit eigenem Profil und eigener App-Identität.
 - Native Videowiedergabe mit Qt WebEngine und libmpv.
 - Experimentelle AVFoundation-Ausgabe für Apples räumliche Mehrkanalwiedergabe; Stereo bleibt verfügbar.
+- Automatische Tonspurauswahl anhand der verfügbaren Decoder, in der gewählten Sprache.
+- Anzeige von Decoder, Audiotreiber, Kanalzahl, PCM-Format und Abtastrate.
 - Korrigierte Trailer-Ansteuerung und native Paketierung.
 - Eigenes Erscheinungsbild in Schwarz und Gold, mit DGi Solutions als Absender.
 
-In der lokalen Prüfung laufen Filmwiedergabe, Trailer und 7.1-PCM über AVFoundation. Das ist der derzeitige technische Stand, keine Aussage über vollständige Atmos- oder DTS:X-Objektwiedergabe.
+Filmwiedergabe und Trailer wurden auf dem Mac geprüft. Mit erzeugten Testdateien bestehen TrueHD, Dolby Digital Plus, Dolby Digital, DTS, FLAC, ALAC, AAC und PCM über AVFoundation sowie Pause, Spulen und Spurwechsel. Atmos- und DTS:X-Objektwiedergabe sind damit noch nicht bestätigt.
 
 ## In Entwicklung: DeepStream Audio Engine
 
@@ -34,7 +38,7 @@ Unsere integrierte Audio-Engine soll Tonspuren und Ausgabegerät gemeinsam berü
 - Ausgabeprofile für Kopfhörer, integrierte Lautsprecher, USB-Audiogeräte und HDMI,
 - verständliche Anzeige von Quelle, Verarbeitung und Ausgabe.
 
-Diese Automatik und der native Objekt-Audio-Weg sind **Entwicklungsziele** und noch keine freigegebenen Produktfunktionen. Details: [Audio-Architektur](docs/AUDIO-ARCHITECTURE.md) und [Projektstatus](docs/STATUS.md).
+Die Tonspurauswahl ist im aktuellen Entwicklungsstand umgesetzt. Geräteprofile, ein vollständiger Fehler-Rückfall und der native Objekt-Audio-Weg sind weitere Entwicklungsschritte. Details: [Audio-Architektur](docs/AUDIO-ARCHITECTURE.md) und [Projektstatus](docs/STATUS.md).
 
 ## Downloads
 
