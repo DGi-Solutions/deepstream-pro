@@ -22,6 +22,8 @@ Das Projekt ist ein eigenständig weiterentwickelter, öffentlicher Fork von [Je
 - **Spatial Audio für AirPods:** räumlicher Filmton mit den macOS-Modi „Fixed“ und „Head Tracked“; derzeit experimentell.
 - Automatische Tonspurauswahl anhand der verfügbaren Decoder, in der gewählten Sprache.
 - Anzeige von Decoder, Audiotreiber, Kanalzahl, PCM-Format und Abtastrate.
+- Audiodetails direkt auf der Filmseite: Codec, Sprache, Kanäle, Bitrate, Abtastrate, Bittiefe, räumliche Quelldaten und Wiedergabevorschau.
+- Einstellungen mit sichtbarem Zurück-Button und Schließen per Escape.
 - Korrigierte Trailer-Ansteuerung und native Paketierung.
 
 Filmwiedergabe, Trailer, Pause, Spulen und Tonspurwechsel wurden auf dem Mac geprüft. Audiotests über AVFoundation bestehen für TrueHD, Dolby Digital Plus, Dolby Digital, DTS, FLAC, ALAC, AAC und PCM.

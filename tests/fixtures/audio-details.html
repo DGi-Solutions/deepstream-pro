@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="de">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>DeepStream Pro · Audiotest</title>
+<style>
+body {margin: 0; padding: 3rem; background: #090909; color: #f4f0e9; font: 16px -apple-system, sans-serif;}
+main {max-width: 1000px; margin: auto;} h1 {font-size: 2rem;}
+.trackSelections {display: grid; gap: .75rem;} select {font: inherit; background: #1b1a18; color: #f4f0e9; padding: .45rem; border: 1px solid #34312b;}
+.mainDetailButtons {display: flex; align-items: center;} .detailButton {width: 64px; height: 64px; background: #222; color: white; border: 0; margin: .25rem;}
+.mainDetailButtons .btnPlay {background: linear-gradient(135deg, #ffdaa1, #f1ba63); color: #090909;}
+.hide {display: none;} .openSettings {margin-top: 1rem; padding: .6rem 1rem; background: #f1ba63; border: 0; border-radius: .4rem; font: inherit;}
+</style></head>
+<body><main id="itemDetailPage"><h1>Audio-Prüfquelle</h1><p>Erzeugte Metadaten für den nativen Oberflächentest.</p>
+<div class="mainDetailButtons"><button class="btnPlay detailButton" aria-label="Wiedergabe"><span class="detailButton-icon">▶</span></button><button class="detailButton" aria-label="Weitere Aktion">↶</button></div>
+<form class="trackSelections">
+<label>Version <select class="selectSource"><option value="fixture-a">Prüfquelle A</option><option value="fixture-b">Prüfquelle B</option></select></label>
+<label>Audio <select class="selectAudio"><option value="2">Deutsch · TrueHD Atmos · 7.1</option><option value="5">Deutsch · Dolby Digital Plus · 5.1</option></select></label>
+</form><button class="openSettings" type="button">Einstellungen</button></main>
+<script>
+const sources = [
+    {Id: 'fixture-a', DefaultAudioStreamIndex: 2, MediaStreams: [
+        {Type:'Audio', Index:2, Codec:'truehd', Profile:'Dolby TrueHD + Dolby Atmos', Language:'deu', Channels:8, ChannelLayout:'7.1', BitRate:5600000, SampleRate:48000, BitDepth:24},
+        {Type:'Audio', Index:5, Codec:'eac3', Language:'deu', Channels:6, ChannelLayout:'5.1', BitRate:640000, SampleRate:48000}
+    ]},
+    {Id:'fixture-b', DefaultAudioStreamIndex:2, MediaStreams:[
+        {Type:'Audio', Index:2, Codec:'flac', Language:'eng', Channels:2, ChannelLayout:'stereo', BitRate:1411200, SampleRate:44100, BitDepth:16}
+    ]}
+];
+window.ApiClient = {getCurrentUserId: () => 'generated-test-user', getItem: async () => ({MediaSources: sources})};
+location.hash = '#/details?id=generated-audio-test';
+document.querySelector('.openSettings').addEventListener('click', () => window.NativeShell.openClientSettings());
+</script></body></html>

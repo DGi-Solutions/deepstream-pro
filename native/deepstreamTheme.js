@@ -57,6 +57,28 @@
                 outline: 2px solid #f1ba63;
                 outline-offset: 3px;
             }
+            .deepstream-audio-details {
+                margin: 1.1rem 0 1.4rem;
+                padding: 1rem 1.2rem;
+                border: 1px solid #34312b;
+                border-radius: .65rem;
+                background: #131313;
+                color: #f4f0e9;
+                font-size: .9rem;
+            }
+            .deepstream-audio-heading { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; }
+            .deepstream-audio-heading h3 { margin: 0; font-size: 1.1rem; font-weight: 650; }
+            .deepstream-audio-badge { padding: .25rem .6rem; border-radius: .35rem; background: #30271b; color: #ffdaa1; }
+            .deepstream-audio-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: .85rem 1.2rem; margin: 1rem 0; }
+            .deepstream-audio-grid dt { color: #b5b1a9; font-size: .82em; margin-bottom: .2rem; }
+            .deepstream-audio-grid dd { margin: 0; font-weight: 550; overflow-wrap: anywhere; }
+            .deepstream-audio-route { padding-top: .75rem; border-top: 1px solid #34312b; }
+            .deepstream-audio-route strong { color: #ffdaa1; }
+            .deepstream-audio-route p { margin: .35rem 0; }
+            .deepstream-audio-route small { display: block; margin-top: .6rem; color: #b5b1a9; }
+            .deepstream-audio-details details { margin-top: 1rem; }
+            .deepstream-audio-details summary { cursor: pointer; color: #f1ba63; }
+            .deepstream-audio-details li { margin: .45rem 0; }
             .deepstream-credit {
                 display: inline-flex;
                 align-items: center;

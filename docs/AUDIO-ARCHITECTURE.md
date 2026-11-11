@@ -20,6 +20,12 @@ Die Statistik zeigt die gewählte Quellspur sowie tatsächlichen Decoder, Audiot
 
 Klangbearbeitung und Downmix-Pegelbegrenzung bleiben eigene Einstellungen. Aus PCM-Abtastrate oder Wortbreite werden weder Bluetooth-Codec noch Verlustfreiheit der Funkübertragung abgeleitet.
 
+## Audioinformationen vor dem Start
+
+Die Filmseite liest die Metadaten der gewählten Filmversion über den vorhandenen angemeldeten Client. Sie zeigt die ausgewählte Quellspur und die geplante automatische Auswahl getrennt. Codec, Sprache, Kanalbelegung, Bitrate, Abtastrate, Bittiefe und räumliche Quelldaten stammen aus den strukturierten Medieninformationen. Fehlende Werte bleiben als nicht angegeben erkennbar.
+
+Die Vorschau verwendet die vorhandene Auswahlregel, die tatsächlichen App-Einstellungen und die gemeldeten Decoder. Die tatsächliche PCM-Ausgabe wird erst nach dem Start in der Wiedergabeinfo angezeigt. Ein später API-Rücklauf darf die Ansicht nach Film-, Versions- oder Kontowechsel nicht überschreiben. Die Ansicht startet keine Wiedergabe und ändert keine Serverdaten.
+
 ## Nächster Schritt: Objektton
 
 E-AC-3 mit Atmos soll einen nativen Apple-Weg erhalten, der die räumlichen Metadaten verarbeitet. Für TrueHD/Atmos und DTS:X wird ein geeigneter Decoder mit Objektverarbeitung benötigt. Neue Komponenten werden erst nach Prüfung von Version, Lizenz, Synchronität und tatsächlichem Ausgabeweg eingebaut. Bisher wurde keine zusätzliche Bibliothek dafür aufgenommen.
