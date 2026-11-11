@@ -167,7 +167,7 @@ function getDeviceProfile() {
     }
 
     return {
-        'Name': 'Jellyfin Desktop',
+        'Name': 'DeepStream Pro',
         'MaxStaticBitrate': 1000000000,
         'MusicStreamingTranscodingBitrate': 1280000,
         'TimelineOffsetSeconds': 5,
@@ -316,7 +316,7 @@ window.NativeShell.AppHost = {
     init() {
         return Promise.resolve({
             deviceName: jmpInfo.deviceName,
-            appName: "Jellyfin Desktop",
+            appName: "DeepStream Pro",
             appVersion: jmpInfo.version
         });
     },
@@ -329,7 +329,7 @@ window.NativeShell.AppHost = {
     getDeviceProfile,
     getSyncProfile: getDeviceProfile,
     appName() {
-        return "Jellyfin Desktop";
+        return "DeepStream Pro";
     },
     appVersion() {
         return jmpInfo.version;
@@ -344,6 +344,30 @@ window.NativeShell.AppHost = {
 
 async function showSettingsModal() {
     await initCompleted;
+
+    const existing = document.getElementById('deepstream-settings-dialog');
+    if (existing) {
+        document.getElementById('deepstream-settings-back')?.focus();
+        return;
+    }
+    const previousFocus = document.activeElement;
+    let onSectionUpdate;
+    const closeModal = () => {
+        document.removeEventListener('keydown', onKeyDown, true);
+        for (const callbacks of [jmpInfo.settingsUpdate, jmpInfo.settingsDescriptionsUpdate]) {
+            const index = callbacks.indexOf(onSectionUpdate);
+            if (index !== -1) callbacks.splice(index, 1);
+        }
+        modalContainer.remove();
+        if (previousFocus?.isConnected) previousFocus.focus();
+    };
+    const onKeyDown = event => {
+        if (event.key === 'Escape') {
+            event.preventDefault();
+            event.stopPropagation();
+            closeModal();
+        }
+    };
 
     const tooltipCSS = `
         .tooltip {
@@ -380,32 +404,45 @@ async function showSettingsModal() {
     document.head.appendChild(style)
 
     const modalContainer = document.createElement("div");
-    modalContainer.className = "dialogContainer";
+    modalContainer.className = "dialogContainer deepstream-settings-container";
+    modalContainer.id = 'deepstream-settings-dialog';
     modalContainer.style.backgroundColor = "rgba(0,0,0,0.5)";
     modalContainer.addEventListener("click", e => {
         if (e.target == modalContainer) {
-            modalContainer.remove();
+            closeModal();
         }
     });
     document.body.appendChild(modalContainer);
 
     const modalContainer2 = document.createElement("div");
-    modalContainer2.className = "focuscontainer dialog dialog-fixedSize dialog-small formDialog opened";
+    modalContainer2.className = "focuscontainer dialog dialog-fixedSize dialog-small formDialog opened deepstream-settings";
+    modalContainer2.setAttribute('role', 'dialog');
+    modalContainer2.setAttribute('aria-modal', 'true');
+    modalContainer2.setAttribute('aria-labelledby', 'deepstream-settings-title');
     modalContainer.appendChild(modalContainer2);
 
     const modalHeader = document.createElement("div");
     modalHeader.className = "formDialogHeader";
     modalContainer2.appendChild(modalHeader);
 
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.id = 'deepstream-settings-back';
+    back.className = 'deepstream-back';
+    back.textContent = '← Zurück';
+    back.addEventListener('click', closeModal);
+    modalHeader.appendChild(back);
+
     const title = document.createElement("h3");
     title.className = "formDialogHeaderTitle";
-    title.textContent = "Client Settings";
+    title.id = 'deepstream-settings-title';
+    title.textContent = "DeepStream Pro · Einstellungen";
     modalHeader.appendChild(title);
 
     const modalContents = document.createElement("div");
     modalContents.className = "formDialogContent smoothScrollY";
     modalContents.style.paddingTop = "2em";
-    modalContents.style.marginBottom = "6.2em";
+    modalContents.style.marginBottom = "0";
     modalContainer2.appendChild(modalContents);
 
     const settingUpdateHandlers = {};
@@ -520,7 +557,7 @@ async function showSettingsModal() {
         createSection();
     }
 
-    const onSectionUpdate = (section) => {
+    onSectionUpdate = (section) => {
         if (section in settingUpdateHandlers) {
             settingUpdateHandlers[section]();
         }
@@ -562,15 +599,30 @@ async function showSettingsModal() {
 
     const closeContainer = document.createElement("div");
     closeContainer.className = "formDialogFooter";
-    modalContents.appendChild(closeContainer);
+    modalContainer2.appendChild(closeContainer);
+
+    const credit = document.createElement('button');
+    credit.type = 'button';
+    credit.className = 'deepstream-credit';
+    credit.setAttribute('aria-label', 'DGi Solutions Website öffnen');
+    const creditText = document.createElement('span');
+    creditText.textContent = 'Entwickelt von';
+    const creditLogo = document.createElement('img');
+    creditLogo.src = jmpInfo.scriptPath + '/dgi-solutions-logo.png';
+    creditLogo.alt = 'DGi Solutions';
+    credit.append(creditText, creditLogo);
+    credit.addEventListener('click', () => window.api.system.openExternalUrl('https://dgi-solutions.de'));
+    closeContainer.appendChild(credit);
 
     const close = document.createElement("button");
     close.className = "raised button-cancel block btnCancel formDialogFooterItem emby-button";
-    close.textContent = "Close"
+    close.textContent = "Schließen"
     close.addEventListener("click", () => {
-        modalContainer.remove();
+        closeModal();
     });
     closeContainer.appendChild(close);
+    document.addEventListener('keydown', onKeyDown, true);
+    back.focus();
 }
 
 let lastFullscreenState = window.jmpInfo.settings.main.fullscreen;

@@ -1,3 +1,5 @@
+> Historische Upstream-Anleitung für Jellyfin Desktop. DeepStream Pro wird ausschließlich für macOS angeboten; dieser Plattformweg ist nicht als DeepStream Pro geprüft.
+
 # Building Jellyfin Desktop on Windows
 
 ## Quick Start

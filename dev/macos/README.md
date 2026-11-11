@@ -1,71 +1,7 @@
-# Building Jellyfin Desktop on macOS
+# DeepStream Pro auf macOS bauen
 
-## Quick Start
+Die aktuelle Anleitung steht unter [README-deepstream.md](README-deepstream.md). Der geprüfte Stand verwendet Apple Silicon, macOS SDK 27, Qt 6.11.3 und libmpv mit AVFoundation.
 
-### Setup and build
-```bash
-dev/macos/setup.sh   # First time: install dependencies
-dev/macos/build.sh   # Build
-```
-### Run the application
-```bash
-dev/macos/run.sh
-```
-### Run the unit tests
-```bash
-dev/macos/test.sh
-```
+Der Befehl `build-deepstream.sh` erstellt eine separat benannte App mit eigener App- und Profil-Identität. Die ursprünglichen Upstream-Skripte in diesem Verzeichnis bleiben aus Herkunftsgründen erhalten; sie sind nicht die Anleitung für diese Prüffassung.
 
-## Prerequisites
-
-- **Xcode Command Line Tools**: `xcode-select --install`
-- **Homebrew**: https://brew.sh
-
-`setup.sh` installs everything else:
-- CMake, Ninja, create-dmg
-- aqtinstall, Qt 6.10.1
-- mpv
-
-## Directory Structure
-
-- `dev/macos/deps/` - Downloaded dependencies (Qt)
-- `build/` - Build output (safe to delete)
-- `build/src/Jellyfin Desktop.app` - Dev build (unbundled, for run.sh)
-- `build/output/Jellyfin Desktop.app` - Release build (bundled, from bundle.sh)
-
-## Scripts
-
-- `setup.sh` - Install all dependencies
-- `build.sh` - Configure and build
-- `bundle.sh` - Create DMG for distribution
-- `run.sh` - Run the built app (passes arguments through)
-- `test.sh` - Run unit tests (sets up Qt/mpv in PATH)
-- `common.sh` - Shared variables (sourced by other scripts)
-
-## Clean Build
-
-```bash
-rm -rf build
-dev/macos/build.sh
-```
-
-## Troubleshooting
-
-### Black Screen / GPU Issues
-
-Try software rendering:
-```bash
-dev/macos/run.sh --software-rendering
-```
-
-### Log Files
-
-```
-~/Library/Logs/Jellyfin Desktop/
-```
-
-## Notes
-
-- Intel builds require macOS 12+
-- Apple Silicon builds require macOS 14+
-- Qt 6.10+ required for WebEngine support
+Daten liegen pro Profil unter `~/Library/Application Support/DeepStream Pro/profiles/`, Logs unter `~/Library/Logs/DeepStream Pro/profiles/`. Private Profile und Rohlogs nicht veröffentlichen.

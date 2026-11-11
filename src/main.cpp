@@ -164,6 +164,10 @@ int main(int argc, char *argv[])
     auto devOption = QCommandLineOption("remote-debugging-port", "Port number for devtools.");
     devOption.setValueName("port");
 
+#ifdef Q_OS_MAC
+    parser.addOption(QCommandLineOption("no-move-to-applications", "Keep this app in its current location."));
+#endif
+
     auto configDirOption = QCommandLineOption("config-dir", "Override config directory path.");
     configDirOption.setValueName("path");
 
@@ -461,7 +465,8 @@ int main(int argc, char *argv[])
     }
 
 #if defined(Q_OS_MAC) && defined(NDEBUG)
-    PFMoveToApplicationsFolderIfNecessary();
+    if (!parser.isSet("no-move-to-applications"))
+      PFMoveToApplicationsFolderIfNecessary();
 #endif
 
     UniqueApplication* uniqueApp = new UniqueApplication(&app);

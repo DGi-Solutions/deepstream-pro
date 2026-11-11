@@ -7,7 +7,7 @@
 </head>
 <body>
     <div id="container">
-        <img class="logo" src="deepstream-pro.png" alt="">
+        <img class="logo" src="deepstream-pro.png" alt="DeepStream Pro Logo">
         <div class="brand-name">DeepStream Pro</div>
         <form id="connect-form">
             <h1 id="title"></h1>
@@ -15,7 +15,23 @@
             <input type="text" id="address" autofocus>
             <button id="connect-button" type="submit"></button>
         </form>
+        <button class="client-settings" type="button" id="client-settings">Einstellungen</button>
+        <a class="company-credit" href="https://dgi-solutions.de" id="company-link">
+            <span>Entwickelt von</span><img src="dgi-solutions-logo.png" alt="DGi Solutions">
+        </a>
     </div>
     <script src="find-webclient.lang.js"></script>
     <script src="find-webclient.js"></script>
+    <script>
+        document.getElementById('client-settings').addEventListener('click', function () {
+            window.NativeShell.openClientSettings();
+        });
+        document.getElementById('company-link').addEventListener('click', function (event) {
+            if (window.api && window.api.system) {
+                event.preventDefault();
+                window.api.system.openExternalUrl('https://dgi-solutions.de');
+            }
+        });
+    </script>
+</body>
 </html>

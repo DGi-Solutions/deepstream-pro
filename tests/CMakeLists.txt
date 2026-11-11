@@ -42,7 +42,7 @@ add_test(NAME test_displaymanager COMMAND test_displaymanager)
 
 find_program(DEEPSTREAM_NODE_EXECUTABLE NAMES node)
 if(DEEPSTREAM_NODE_EXECUTABLE)
-  foreach(script deepstream-inputPlugin deepstream-audio-engine deepstream-audio-player)
+  foreach(script deepstream-inputPlugin deepstream-audio-engine deepstream-audio-player deepstream-settings-dialog)
     add_test(NAME ${script} COMMAND ${DEEPSTREAM_NODE_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/${script}.test.js)
     set_tests_properties(${script} PROPERTIES WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endforeach()
