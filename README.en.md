@@ -11,21 +11,19 @@ DeepStream Pro plays films and series from your Jellyfin server. It is a public 
 
 ## Platform and status
 
-DeepStream Pro is developed exclusively for **macOS**. Native testing so far has been on Apple Silicon. The project is in development: the source code is public, but no installable download has been released yet.
+DeepStream Pro is developed exclusively for **macOS**. Development and testing currently take place on Apple Silicon Macs.
 
 The app uses Qt WebEngine and libmpv. Movie pages show available audio and video details. Audio track selection considers the chosen language and available decoders; manual selection remains available.
 
 ## Spatial Audio and movie sound
 
-The experimental Spatial Audio output sends decoded multichannel PCM to macOS. Supported AirPods can use the macOS **Fixed** and **Head Tracked** modes. An Atmos or DTS:X source label alone does not establish that its object metadata is being rendered.
+The experimental Spatial Audio output sends multichannel PCM to macOS. Supported AirPods can use the macOS **Fixed** and **Head Tracked** modes. TrueHD/Atmos and DTS:X are currently played as multichannel PCM.
 
-A native Apple audio path for Dolby Digital Plus (E-AC-3) with Atmos/JOC is in development for **0.3**. Picture, sound, pause, seek and restarting playback were tested in a separate app; macOS displayed “Dolby Atmos”. Integration with authenticated Jellyfin streams is still underway.
-
-TrueHD/Atmos and DTS:X are currently decoded to channel audio. Rendering their object metadata has not yet been established. [Audio architecture](docs/AUDIO-ARCHITECTURE.md) (German; status as of November 11)
+For **0.3**, we are integrating Apple's audio playback for Dolby Digital Plus with Dolby Atmos. Jellyfin integration is still in progress. [Audio architecture](docs/AUDIO-ARCHITECTURE.md) (German)
 
 ## Coming next: 0.4
 
-Dolby Vision, end-to-end HDR output and opening local movie files are planned for **0.4**. A 10-bit source or framebuffer alone does not confirm Dolby Vision output.
+Dolby Vision, HDR output and opening local movie files are planned for **0.4**.
 
 ## Downloads
 
