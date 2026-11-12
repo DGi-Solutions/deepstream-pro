@@ -5,36 +5,36 @@
 
 [Deutsch](README.md) · English
 
-**A movie player for macOS with a focus on high-quality sound.**
+**0.3 preview**
 
-DeepStream Pro plays films and series from your Jellyfin server. It is a public fork of [Jellyfin Desktop](https://github.com/jellyfin/jellyfin-desktop), developed further by [DGi Solutions](https://dgi-solutions.de).
+Our goal is high-fidelity sound for your own films and series — streamed locally or online on your Mac. DeepStream Pro plays your content from your Jellyfin server.
 
-## Platform and status
+## Your cinema on Mac
 
-DeepStream Pro is developed exclusively for **macOS**. Development and testing currently take place on Apple Silicon Macs.
+DeepStream Pro brings a clear film and series library together with sound controls for a more personal experience. The app runs on macOS; development and testing take place on Apple Silicon Macs.
 
-The app uses Qt WebEngine and libmpv. Movie pages show available audio and video details. Audio track selection considers the chosen language and available decoders; manual selection remains available.
+- **Spatial Audio on the film page:** Turn on spatial sound and use the macOS Fixed and Head Tracked modes with supported AirPods.
+- **Dolby Atmos:** Enjoy Dolby Digital Plus with Dolby Atmos through Apple's audio playback.
+- **The right audio track:** Automatic selection respects your language. You can also choose a track yourself at any time.
+- **The details at a glance:** See the codec, language, channels, bitrate, sample rate and more audio and video information before playback.
+- **Sound your way:** Playback starts with a neutral sound. Optional sound profiles let you adjust it to your taste.
 
-## Spatial Audio and movie sound
+Audio information identifies tracks including TrueHD, DTS:X, DTS-HD, Dolby Digital Plus, Dolby Digital and AAC.
 
-The experimental Spatial Audio output sends multichannel PCM to macOS. Supported AirPods can use the macOS **Fixed** and **Head Tracked** modes. TrueHD/Atmos and DTS:X are currently played as multichannel PCM.
+## Coming in 0.4
 
-For **0.3**, we are integrating Apple's audio playback for Dolby Digital Plus with Dolby Atmos. Jellyfin integration is still in progress. [Audio architecture](docs/AUDIO-ARCHITECTURE.md) (German)
-
-## Coming next: 0.4
-
-Dolby Vision, HDR output and opening local movie files are planned for **0.4**.
+Dolby Vision, HDR and opening local movie files are planned for 0.4.
 
 ## Downloads
 
-There are **no published downloads** on the [releases page](https://github.com/DGi-Solutions/deepstream-pro/releases) yet. GitHub source archives are not installable apps. When a package is published, its release will include version, checksums, signing and Apple notarization information.
+There are currently no published downloads on the [releases page](https://github.com/DGi-Solutions/deepstream-pro/releases).
 
 ## Building
 
-The native build used so far requires an Apple Silicon Mac, the macOS SDK, Qt 6 with WebEngine, libmpv, CMake, Ninja and pkg-config. Versions and instructions are in the [build guide](dev/macos/README-deepstream.md) (German).
+The [build guide](dev/macos/README-deepstream.md) covers the required tools and dependencies (German).
 
 ## Contributing and license
 
-Bug reports and contributions are welcome: [CONTRIBUTING.md](CONTRIBUTING.md). Please keep private media, credentials, profiles and unfiltered logs out of public issues and pull requests.
+Contributions and bug reports are welcome: [CONTRIBUTING.md](CONTRIBUTING.md). Please keep private media, credentials, profiles and unfiltered logs out of public issues and pull requests.
 
-DeepStream Pro builds on the work of Jellyfin Desktop and its contributors. [Origin and upstream](docs/UPSTREAM.md) · [GNU GPL v2](LICENSE)
+DeepStream Pro is a public fork of [Jellyfin Desktop](https://github.com/jellyfin/jellyfin-desktop), developed further by [DGi Solutions](https://dgi-solutions.de). We thank the Jellyfin Desktop contributors for their work. [Origin and upstream](docs/UPSTREAM.md) · [GNU GPL v2](LICENSE)

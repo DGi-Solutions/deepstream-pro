@@ -5,36 +5,36 @@
 
 [English](README.en.md) · Deutsch
 
-**Ein Filmplayer für macOS mit besonderem Augenmerk auf hochwertigen Ton.**
+**Vorschau auf 0.3**
 
-DeepStream Pro spielt Filme und Serien von deinem Jellyfin-Server ab. Das Projekt ist ein öffentlicher Fork von [Jellyfin Desktop](https://github.com/jellyfin/jellyfin-desktop), den [DGi Solutions](https://dgi-solutions.de) weiterentwickelt.
+Unser Ziel ist High-Fidelity-Sound für deine eigenen Filme und Serien – beim lokalen Streaming und online auf dem Mac. DeepStream Pro spielt deine Inhalte von deinem Jellyfin-Server ab.
 
-## Plattform und Stand
+## Dein Kino auf dem Mac
 
-DeepStream Pro wird ausschließlich für **macOS** entwickelt. Entwicklung und Tests laufen derzeit auf Macs mit Apple Silicon.
+DeepStream Pro verbindet eine übersichtliche Film- und Serienansicht mit Einstellungen für anspruchsvollen Klang. Die App läuft auf macOS; Entwicklung und Tests erfolgen auf Macs mit Apple Silicon.
 
-Die App nutzt Qt WebEngine und libmpv. Die Filmseite zeigt die verfügbaren Audio- und Videodaten. Die Tonspurauswahl berücksichtigt die gewählte Sprache und die verfügbaren Decoder. Eine manuelle Auswahl bleibt möglich.
+- **Spatial Audio direkt auf der Filmseite:** Schalte räumlichen Klang ein und nutze mit unterstützten AirPods die macOS-Modi Fixed und Head Tracked.
+- **Dolby Atmos:** Genieße Dolby Digital Plus mit Dolby Atmos über Apples Audiowiedergabe.
+- **Die passende Tonspur:** Die automatische Auswahl berücksichtigt deine Sprache. Du kannst die Tonspur jederzeit selbst wählen.
+- **Alle Details im Blick:** Sieh vor dem Start Codec, Sprache, Kanäle, Bitrate, Abtastrate und weitere Audio- und Videodaten.
+- **Klang nach deinem Geschmack:** Die Wiedergabe startet neutral. Optionale Klangprofile passen den Ton an deine Vorlieben an.
 
-## Spatial Audio und Filmton
+Die Audioinformationen zeigen unter anderem Tonspuren mit TrueHD, DTS:X, DTS-HD, Dolby Digital Plus, Dolby Digital und AAC an.
 
-Die experimentelle Spatial-Audio-Ausgabe gibt Mehrkanalton als PCM an macOS weiter. Mit unterstützten AirPods stehen die macOS-Modi **Fixed** und **Head Tracked** zur Verfügung. TrueHD/Atmos und DTS:X gibt die App derzeit als Mehrkanal-PCM wieder.
+## Ausblick auf 0.4
 
-Mit **0.3** integrieren wir Apples Audiowiedergabe für Dolby Digital Plus mit Dolby Atmos. Die Jellyfin-Anbindung ist noch in Arbeit. [Mehr zur Audio-Architektur](docs/AUDIO-ARCHITECTURE.md)
-
-## Ausblick: 0.4
-
-Für **0.4** sind Dolby Vision, HDR-Ausgabe und das Öffnen lokaler Filmdateien vorgesehen.
+Dolby Vision, HDR und das Öffnen lokaler Filmdateien stehen für 0.4 auf dem Plan.
 
 ## Downloads
 
-Auf der [Release-Seite](https://github.com/DGi-Solutions/deepstream-pro/releases) gibt es derzeit **keine veröffentlichten Downloads**. Quellcode-Archive sind keine installierbaren Apps. Sobald ein Paket erscheint, stehen Version, Prüfsummen sowie Angaben zu Signatur und Apple-Notarisierung bei der jeweiligen Veröffentlichung.
+Auf der [Release-Seite](https://github.com/DGi-Solutions/deepstream-pro/releases) gibt es derzeit keine veröffentlichten Downloads.
 
 ## Selbst bauen
 
-Der bisherige native Build verwendet einen Apple-Silicon-Mac, das macOS SDK, Qt 6 mit WebEngine, libmpv, CMake, Ninja und pkg-config. Details und Versionen stehen in der [Build-Anleitung](dev/macos/README-deepstream.md).
+Die [Build-Anleitung](dev/macos/README-deepstream.md) beschreibt die benötigten Werkzeuge und Abhängigkeiten.
 
 ## Mitwirken und Lizenz
 
-Fehlerberichte und Beiträge sind willkommen: [CONTRIBUTING.md](CONTRIBUTING.md). Bitte keine privaten Medien, Zugangsdaten, Profile oder ungefilterten Logs öffentlich teilen.
+Beiträge und Fehlerberichte sind willkommen: [CONTRIBUTING.md](CONTRIBUTING.md). Bitte keine privaten Medien, Zugangsdaten, Profile oder ungefilterten Logs öffentlich teilen.
 
-DeepStream Pro baut auf der Arbeit von Jellyfin Desktop und seinen Mitwirkenden auf. [Herkunft und Upstream](docs/UPSTREAM.md) · [GNU GPL v2](LICENSE)
+DeepStream Pro ist ein öffentlicher Fork von [Jellyfin Desktop](https://github.com/jellyfin/jellyfin-desktop), weiterentwickelt von [DGi Solutions](https://dgi-solutions.de). Wir danken den Jellyfin-Desktop-Mitwirkenden für ihre Arbeit. [Herkunft und Upstream](docs/UPSTREAM.md) · [GNU GPL v2](LICENSE)
