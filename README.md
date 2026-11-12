@@ -3,66 +3,40 @@
 
 # DeepStream Pro
 
-**Ein audiophiler Filmplayer für macOS – entwickelt von [DGi Solutions](https://dgi-solutions.de).**
+[English](README.en.md) · Deutsch
 
-DeepStream Pro wird für Filmfreunde entwickelt, die hochwertige Tonspuren auf dem Mac nutzen wollen – mit Kopfhörern, AirPods, einem USB-DAC oder einer Heimkinoanlage. Die integrierte Audio-Engine soll Tonspur und Ausgabegerät aufeinander abstimmen und zeigen, wie der Ton tatsächlich wiedergegeben wird.
+**Ein Filmplayer für macOS mit besonderem Augenmerk auf hochwertigen Ton.**
 
-Die heutige Prüffassung nutzt die Medienauswahl eines verbundenen Jellyfin-Servers. Das direkte Öffnen lokaler Filme oder von NAS-Freigaben ohne diesen Serverweg ist noch nicht als Nutzerablauf umgesetzt und geprüft.
+DeepStream Pro spielt Filme und Serien von deinem Jellyfin-Server ab. Das Projekt ist ein öffentlicher Fork von [Jellyfin Desktop](https://github.com/jellyfin/jellyfin-desktop), den [DGi Solutions](https://dgi-solutions.de) weiterentwickelt.
 
-Das Projekt ist ein eigenständig weiterentwickelter, öffentlicher Fork von [Jellyfin Desktop](https://github.com/jellyfin/jellyfin-desktop). Es befindet sich in aktiver Entwicklung.
+## Plattform und Stand
 
-## Plattform
+DeepStream Pro wird ausschließlich für **macOS** entwickelt. Der bisherige native Teststand läuft auf Apple Silicon. Das Projekt ist in Entwicklung; der Quellcode ist öffentlich, ein installierbarer Download wurde noch nicht veröffentlicht.
 
-**DeepStream Pro wird ausschließlich für macOS entwickelt.** Der aktuelle native Teststand ist für Apple Silicon mit macOS 27 gebaut. Weitere Mac-Konfigurationen werden erst nach entsprechender Prüfung als unterstützt aufgeführt.
+Die App nutzt Qt WebEngine und libmpv. Die Filmseite zeigt die verfügbaren Audio- und Videodaten. Die Tonspurauswahl berücksichtigt die gewählte Sprache und die verfügbaren Decoder. Eine manuelle Auswahl bleibt möglich.
 
-## Aktueller Teststand
+## Spatial Audio und Filmton
 
-- Separate App **DeepStream Pro** mit eigenem Profil und eigener App-Identität.
-- Native Videowiedergabe mit Qt WebEngine und libmpv.
-- **Spatial Audio für AirPods:** räumlicher Filmton mit den macOS-Modi „Fixed“ und „Head Tracked“; derzeit experimentell.
-- Automatische Tonspurauswahl anhand der verfügbaren Decoder, in der gewählten Sprache.
-- Anzeige von Decoder, Audiotreiber, Kanalzahl, PCM-Format und Abtastrate.
-- Audiodetails direkt auf der Filmseite: Codec, Sprache, Kanäle, Bitrate, Abtastrate, Bittiefe, räumliche Quelldaten und Wiedergabevorschau.
-- Einstellungen mit sichtbarem Zurück-Button und Schließen per Escape.
-- Korrigierte Trailer-Ansteuerung und native Paketierung.
+Die experimentelle Spatial-Audio-Ausgabe gibt decodierten Mehrkanalton als PCM an macOS weiter. Mit unterstützten AirPods stehen die macOS-Modi **Fixed** und **Head Tracked** zur Verfügung. Aus einer Atmos- oder DTS:X-Kennung der Quelle lässt sich dabei nicht auf die Verarbeitung ihrer Objektdaten schließen.
 
-Filmwiedergabe, Trailer, Pause, Spulen und Tonspurwechsel wurden auf dem Mac geprüft. Audiotests über AVFoundation bestehen für TrueHD, Dolby Digital Plus, Dolby Digital, DTS, FLAC, ALAC, AAC und PCM.
+Für **0.3** entsteht ein nativer Apple-Audioweg für Dolby Digital Plus (E-AC-3) mit Atmos/JOC. Bild, Ton, Pause, Springen und Neustart wurden in einer separaten App getestet; macOS zeigte „Dolby Atmos“ an. Die Anbindung an angemeldete Jellyfin-Streams ist noch in Arbeit.
 
-## Spatial Audio
+TrueHD/Atmos und DTS:X werden bisher zu Kanalton decodiert. Die Verarbeitung ihrer Objektdaten ist noch nicht nachgewiesen. [Mehr zur Audio-Architektur](docs/AUDIO-ARCHITECTURE.md) (Stand: 11. November)
 
-DeepStream Pro gibt Mehrkanalton über AVFoundation an macOS weiter. Mit AirPods lässt sich der Ton räumlich wiedergeben: mit fester Ausrichtung über **Fixed** oder mit Kopfverfolgung über **Head Tracked**. Die Ausgabe lässt sich in den Audioeinstellungen einschalten.
+## Ausblick: 0.4
 
-Die aktuelle Spatial-Audio-Ausgabe verwendet Mehrkanal-PCM. Die Verarbeitung von Atmos- und DTS:X-Objektdaten ist der nächste Schritt der Audio-Engine.
-
-## In Entwicklung: DeepStream Audio Engine
-
-Unsere integrierte Audio-Engine soll Tonspuren und Ausgabegerät gemeinsam berücksichtigen:
-
-- automatische Formatwahl innerhalb der gewünschten Sprache,
-- Atmos und DTS:X, wenn der tatsächlich verfügbare Wiedergabeweg die räumlichen Informationen verarbeitet,
-- passende Rückfälle für TrueHD, DTS-HD MA/HRA, Dolby Digital Plus (E-AC-3), Dolby Digital (AC-3), DTS, FLAC, ALAC, PCM und AAC,
-- neutrale Wiedergabe sowie getrennte, bewusst gewählte Klangbearbeitung,
-- Ausgabeprofile für Kopfhörer, integrierte Lautsprecher, USB-Audiogeräte und HDMI,
-- verständliche Anzeige von Quelle, Verarbeitung und Ausgabe.
-
-Die Tonspurauswahl ist im aktuellen Entwicklungsstand umgesetzt. Geräteprofile, ein vollständiger Fehler-Rückfall und der native Objekt-Audio-Weg sind weitere Entwicklungsschritte. Details: [Audio-Architektur](docs/AUDIO-ARCHITECTURE.md) und [Projektstatus](docs/STATUS.md).
+Für **0.4** sind Dolby Vision, die durchgängige HDR-Ausgabe und das Öffnen lokaler Filmdateien vorgesehen. Ein 10-Bit-Quellformat oder Bildpuffer allein bestätigt noch keine Dolby-Vision-Ausgabe.
 
 ## Downloads
 
-Es gibt derzeit **keine stabile öffentliche Veröffentlichung**. Geprüfte macOS-Prüffassungen werden ausschließlich in den [Releases dieses Projekts](https://github.com/DGi-Solutions/deepstream-pro/releases) bereitgestellt, sobald sie veröffentlicht sind.
-
-Quellcode-Archive von GitHub sind keine installierbaren Apps. Jede Prüffassung erhält eigene Angaben zu Version, Prüfsumme, getesteten Macs und Signaturstatus.
+Auf der [Release-Seite](https://github.com/DGi-Solutions/deepstream-pro/releases) gibt es derzeit **keine veröffentlichten Downloads**. Quellcode-Archive sind keine installierbaren Apps. Sobald ein Paket erscheint, stehen Version, Prüfsummen sowie Angaben zu Signatur und Apple-Notarisierung bei der jeweiligen Veröffentlichung.
 
 ## Selbst bauen
 
-Der native Build benötigt einen Apple-Silicon-Mac, macOS SDK 27 oder neuer, Qt 6.11.3 mit WebEngine sowie libmpv, CMake, Ninja und pkg-config. [Build-Anleitung](dev/macos/README-deepstream.md).
+Der bisherige native Build verwendet einen Apple-Silicon-Mac, das macOS SDK, Qt 6 mit WebEngine, libmpv, CMake, Ninja und pkg-config. Details und Versionen stehen in der [Build-Anleitung](dev/macos/README-deepstream.md).
 
-## Mitwirken
+## Mitwirken und Lizenz
 
-Fehlerberichte und Beiträge sind willkommen. Bitte beachte [CONTRIBUTING.md](CONTRIBUTING.md). Keine Filmdateien, Zugangsdaten, privaten Profile oder ungefilterten Diagnoselogs in öffentliche Issues oder Pull Requests laden.
+Fehlerberichte und Beiträge sind willkommen: [CONTRIBUTING.md](CONTRIBUTING.md). Bitte keine privaten Medien, Zugangsdaten, Profile oder ungefilterten Logs öffentlich teilen.
 
-## Herkunft und Lizenz
-
-DeepStream Pro baut auf der Arbeit von Jellyfin Desktop und dessen Mitwirkenden auf. Herkunft, Basisstand und unsere Änderungen sind unter [UPSTREAM.md](docs/UPSTREAM.md) dokumentiert. Die vorhandene [GNU GPL v2](LICENSE) und weitere Komponentenhinweise bleiben erhalten.
-
-**DeepStream Pro by DGi Solutions** · [dgi-solutions.de](https://dgi-solutions.de)
+DeepStream Pro baut auf der Arbeit von Jellyfin Desktop und seinen Mitwirkenden auf. [Herkunft und Upstream](docs/UPSTREAM.md) · [GNU GPL v2](LICENSE)
