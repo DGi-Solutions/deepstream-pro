@@ -11,7 +11,11 @@ Unser Ziel ist High-Fidelity-Sound für deine eigenen Filme und Serien – beim 
 
 ## Dein Kino auf dem Mac
 
-DeepStream Pro verbindet eine übersichtliche Film- und Serienansicht mit Einstellungen für anspruchsvollen Klang. Die App läuft auf macOS; Entwicklung und Tests erfolgen auf Macs mit Apple Silicon.
+DeepStream Pro läuft auf macOS; Entwicklung und Tests erfolgen auf Macs mit Apple Silicon.
+
+## Deine Mediathek im Überblick
+
+Die eigene Oberfläche zeigt Filme und Serien in einer übersichtlichen Mediathek. Filmseiten verbinden Hintergrundmotive mit Audio- und Videodetails. Tonspur und Spatial Audio lassen sich dort direkt auswählen. Eine einheitliche Navigation und Zurück-Buttons führen durch die App.
 
 - **Spatial Audio direkt auf der Filmseite:** Schalte räumlichen Klang ein und nutze mit unterstützten AirPods die macOS-Modi Fixed und Head Tracked.
 - **Dolby Atmos:** Genieße Dolby Digital Plus mit Dolby Atmos über Apples Audiowiedergabe.
