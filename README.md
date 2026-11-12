@@ -27,7 +27,7 @@ Dolby Vision, HDR und das Öffnen lokaler Filmdateien stehen für 0.4 auf dem Pl
 
 ## Downloads
 
-Auf der [Release-Seite](https://github.com/DGi-Solutions/deepstream-pro/releases) gibt es derzeit keine veröffentlichten Downloads.
+Auf der [Release-Seite](https://github.com/DGi-Solutions/deepstream-pro/releases) gibt es derzeit keine veröffentlichten Downloads. Die Download-Version erscheint als macOS-Installer mit Developer-ID-Signatur und Apple-Notarisierung.
 
 ## Selbst bauen
 

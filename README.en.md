@@ -27,7 +27,7 @@ Dolby Vision, HDR and opening local movie files are planned for 0.4.
 
 ## Downloads
 
-There are currently no published downloads on the [releases page](https://github.com/DGi-Solutions/deepstream-pro/releases).
+There are currently no published downloads on the [releases page](https://github.com/DGi-Solutions/deepstream-pro/releases). The download will be a macOS installer signed with Developer ID and notarized by Apple.
 
 ## Building
 
