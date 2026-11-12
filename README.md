@@ -17,6 +17,7 @@ DeepStream Pro läuft auf macOS; Entwicklung und Tests erfolgen auf Macs mit App
 
 Die eigene Oberfläche zeigt Filme und Serien in einer übersichtlichen Mediathek. Filmseiten verbinden Hintergrundmotive mit Audio- und Videodetails. Tonspur und Spatial Audio lassen sich dort direkt auswählen. Eine einheitliche Navigation und Zurück-Buttons führen durch die App.
 
+- **10-Bit-Video:** Spiele Filme und Serien mit 10-Bit-Farbtiefe ab.
 - **Spatial Audio direkt auf der Filmseite:** Schalte räumlichen Klang ein und nutze mit unterstützten AirPods die macOS-Modi Fixed und Head Tracked.
 - **Dolby Atmos:** Genieße Dolby Digital Plus mit Dolby Atmos über Apples Audiowiedergabe.
 - **Die passende Tonspur:** Die automatische Auswahl berücksichtigt deine Sprache. Du kannst die Tonspur jederzeit selbst wählen.

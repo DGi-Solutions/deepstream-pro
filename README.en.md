@@ -17,6 +17,7 @@ DeepStream Pro runs on macOS; development and testing take place on Apple Silico
 
 The app's own interface brings films and series together in a clear library. Film pages pair backdrop artwork with audio and video details, with audio tracks and Spatial Audio controls close at hand. Consistent navigation and back buttons make it easy to move around.
 
+- **10-bit video:** Play films and series encoded in 10-bit.
 - **Spatial Audio on the film page:** Turn on spatial sound and use the macOS Fixed and Head Tracked modes with supported AirPods.
 - **Dolby Atmos:** Enjoy Dolby Digital Plus with Dolby Atmos through Apple's audio playback.
 - **The right audio track:** Automatic selection respects your language. You can also choose a track yourself at any time.
