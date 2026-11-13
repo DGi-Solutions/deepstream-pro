@@ -5,7 +5,7 @@
 
 [Deutsch](README.md) · English
 
-**0.3 preview**
+**Version 0.3.0**
 
 Our goal is high-fidelity sound for your own films and series — streamed locally or online on your Mac. DeepStream Pro plays your content from your Jellyfin server.
 
@@ -19,7 +19,6 @@ The app's own interface brings films and series together in a clear library. Fil
 
 - **10-bit video:** Play films and series encoded in 10-bit.
 - **Spatial Audio on the film page:** Turn on spatial sound and use the macOS Fixed and Head Tracked modes with supported AirPods.
-- **Dolby Atmos:** Enjoy Dolby Digital Plus with Dolby Atmos through Apple's audio playback.
 - **The right audio track:** Automatic selection respects your language. You can also choose a track yourself at any time.
 - **The details at a glance:** See the codec, language, channels, bitrate, sample rate and more audio and video information before playback.
 - **Sound your way:** Playback starts with a neutral sound. Optional sound profiles let you adjust it to your taste.
@@ -28,11 +27,11 @@ Audio information identifies tracks including TrueHD, DTS:X, DTS-HD, Dolby Digit
 
 ## Coming in 0.4
 
-Dolby Vision, HDR and opening local movie files are planned for 0.4.
+Dolby Vision, HDR, object-based Dolby TrueHD/Atmos audio and opening local movie files are planned for 0.4.
 
 ## Downloads
 
-There are currently no published downloads on the [releases page](https://github.com/DGi-Solutions/deepstream-pro/releases). The download will be a macOS installer signed with Developer ID and notarized by Apple.
+Downloads and release notes: [releases page](https://github.com/DGi-Solutions/deepstream-pro/releases). The macOS installer is intended for Apple Silicon and macOS 27.2 or later.
 
 ## Building
 
