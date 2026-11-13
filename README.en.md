@@ -25,6 +25,16 @@ The app's own interface brings films and series together in a clear library. Fil
 
 Audio information identifies tracks including TrueHD, DTS:X, DTS-HD, Dolby Digital Plus, Dolby Digital and AAC.
 
+## A look at DeepStream Pro
+
+Edited product views with fictional film examples.
+
+<table>
+<tr><td><img src="https://dgi-solutions.de/assets/deepstream-product-screen.png" alt="Film library" width="600"><br>Film library</td><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-1.png" alt="Home" width="600"><br>Home</td></tr>
+<tr><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-2.png" alt="Film collections" width="600"><br>Film collections</td><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-3.png" alt="Collection details" width="600"><br>Collection details</td></tr>
+<tr><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-4.png" alt="Film details" width="600"><br>Film details</td><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-5.png" alt="Audio and video information" width="600"><br>Audio and video information</td></tr>
+</table>
+
 ## Coming in 0.4
 
 Dolby Vision, HDR, object-based Dolby TrueHD/Atmos audio and opening local movie files are planned for 0.4.
