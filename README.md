@@ -42,7 +42,7 @@ Für 0.4 sind Dolby Vision, HDR, objektbasierter Ton für Dolby TrueHD/Atmos und
 
 ## Downloads
 
-Downloads und Versionshinweise: [Release-Seite](https://github.com/DGi-Solutions/deepstream-pro/releases). Der macOS-Installer ist für Apple Silicon und macOS 27.2 oder neuer vorgesehen.
+Downloads und Versionshinweise: [Release-Seite](https://github.com/DGi-Solutions/deepstream-pro/releases). Der macOS-Installer ist für Apple Silicon und macOS 27.2 oder neuer vorgesehen. App und Installer sind mit einer Apple Developer ID signiert und von Apple notarisiert.
 
 ## Mitwirken und Lizenz
 
