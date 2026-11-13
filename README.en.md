@@ -33,6 +33,7 @@ Edited product views with fictional film examples.
 <tr><td><img src="https://dgi-solutions.de/assets/deepstream-product-screen.png" alt="Film library" width="600"><br>Film library</td><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-1.png" alt="Home" width="600"><br>Home</td></tr>
 <tr><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-2.png" alt="Film collections" width="600"><br>Film collections</td><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-3.png" alt="Collection details" width="600"><br>Collection details</td></tr>
 <tr><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-4.png" alt="Film details" width="600"><br>Film details</td><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-5.png" alt="Audio and video information" width="600"><br>Audio and video information</td></tr>
+<tr><td colspan="2"><img src="https://dgi-solutions.de/assets/deepstream-verbindung.png" alt="Connecting to the server" width="600"><br>Connecting to the server</td></tr>
 </table>
 
 ## Coming in 0.4
