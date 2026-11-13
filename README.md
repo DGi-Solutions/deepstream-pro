@@ -25,6 +25,16 @@ Die eigene Oberfläche zeigt Filme und Serien in einer übersichtlichen Mediathe
 
 Die Audioinformationen zeigen unter anderem Tonspuren mit TrueHD, DTS:X, DTS-HD, Dolby Digital Plus, Dolby Digital und AAC an.
 
+## Einblicke in DeepStream Pro
+
+Bearbeitete Produktansichten mit fiktiven Filmbeispielen.
+
+<table>
+<tr><td><img src="https://dgi-solutions.de/assets/deepstream-product-screen.png" alt="Filmbibliothek" width="600"><br>Filmbibliothek</td><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-1.png" alt="Startseite" width="600"><br>Startseite</td></tr>
+<tr><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-2.png" alt="Filmreihen" width="600"><br>Filmreihen</td><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-3.png" alt="Details einer Filmreihe" width="600"><br>Details einer Filmreihe</td></tr>
+<tr><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-4.png" alt="Filmdetails" width="600"><br>Filmdetails</td><td><img src="https://dgi-solutions.de/assets/deepstream-illustration-5.png" alt="Audio- und Videoinformationen" width="600"><br>Audio- und Videoinformationen</td></tr>
+</table>
+
 ## Ausblick auf 0.4
 
 Für 0.4 sind Dolby Vision, HDR, objektbasierter Ton für Dolby TrueHD/Atmos und das Öffnen lokaler Filmdateien geplant.
