@@ -7,14 +7,15 @@ if(APPLE)
 endif(APPLE)
 
 if(USE_STATIC_MPVQT)
+  set(DEEPSTREAM_MPVQT_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/mpvqt/src" CACHE PATH "mpvqt source directory")
   # Build MpvQt directly from sources
   add_library(MpvQt STATIC
-    mpvqt/src/mpvabstractitem.cpp
-    mpvqt/src/mpvcontroller.cpp
+    "${DEEPSTREAM_MPVQT_SOURCE_DIR}/mpvabstractitem.cpp"
+    "${DEEPSTREAM_MPVQT_SOURCE_DIR}/mpvcontroller.cpp"
     mpvrenderer-wrapper.cpp
   )
   target_include_directories(MpvQt PUBLIC
-    ${CMAKE_CURRENT_SOURCE_DIR}/mpvqt/src
+    "${DEEPSTREAM_MPVQT_SOURCE_DIR}"
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/MpvQt
   )

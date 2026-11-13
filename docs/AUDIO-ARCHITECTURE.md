@@ -26,9 +26,31 @@ Die Filmseite liest die Metadaten der gewählten Filmversion über den vorhanden
 
 Die Vorschau verwendet die vorhandene Auswahlregel, die tatsächlichen App-Einstellungen und die gemeldeten Decoder. Die tatsächliche PCM-Ausgabe wird erst nach dem Start in der Wiedergabeinfo angezeigt. Ein später API-Rücklauf darf die Ansicht nach Film-, Versions- oder Kontowechsel nicht überschreiben. Die Ansicht startet keine Wiedergabe und ändert keine Serverdaten.
 
-## Nächster Schritt: Objektton
+## 0.3: nativer Apple-Wiedergabeweg
 
-E-AC-3 mit Atmos soll einen nativen Apple-Weg erhalten, der die räumlichen Metadaten verarbeitet. Für TrueHD/Atmos und DTS:X wird ein geeigneter Decoder mit Objektverarbeitung benötigt. Neue Komponenten werden erst nach Prüfung von Version, Lizenz, Synchronität und tatsächlichem Ausgabeweg eingebaut. Bisher wurde keine zusätzliche Bibliothek dafür aufgenommen.
+Ein separater AVPlayer-Weg verwendet dieselbe Player-Instanz für Bild und Ton. Der experimentelle Adapter wird in PlayerComponent eingebunden; nach außen bleibt ein DeepStream-Player mit derselben Bedienung bestehen. mpv bleibt für die regulären Quellen und als Rückfall erhalten.
+
+Der erste Integrationsschnitt ist auf einen expliziten Testbuild und eine einzelne öffentliche E-AC-3/JOC-Testquelle begrenzt. JavaScript übergibt einen eng geprüften Testauftrag; die native Seite prüft die abgerufene Masterplaylist gegen den festgelegten SHA-256-Wert. Die Testoption ist keine allgemeine HLS- oder Anmeldefunktion.
+
+Der Enginewechsel benötigt eine bestätigte mpv-Stilllegung, getrennte Sitzungszustände und das Verwerfen verspäteter Ereignisse. Lautstärke, Stummstatus, Pause und Position müssen beim Übergang erhalten bleiben. Ein AV-Startfehler schließt den Apple-Weg vor dem Rückfall zu mpv. Die vollständige App-Anbindung wird gesondert nativ geprüft.
+
+`getAudioSignalPath` meldet die aktive Engine und deren eigene Laufzeitwerte. Bei AVPlayer bleiben nicht ermittelte Decoder-, PCM- und Ausgabekanaldaten leer. Der Status `fixture_joc_declared` beschreibt die deklarierte JOC-Testquelle. `availableAudioOptions` und `selectedAudioOptions` geben die von AVFoundation ermittelten Auswahlzahlen getrennt an. Diese Angaben bestätigen keine Objektverarbeitung. `objectRenderingConfirmed` bleibt ohne eigenen Laufzeitnachweis falsch. Die Wiedergabeinfo verwirft späte Antworten nach Quellenwechsel oder Stop.
+
+Die öffentliche Referenz wurde im isolierten App-Test über die echte PlayerComponent mit hörbarem Ton und der macOS-Anzeige „Dolby Atmos“ an AirPods geprüft. Der Nutzer bestätigte Bild und Web-Bedienleiste sowie Pause, Fortsetzen und Springen. Der zusätzliche WebEngine-Renderlayer wird im Apple-Pfad gezielt abgeschaltet und beim Rückweg wieder aktiviert. Die reguläre Jellyfin-Wiedergabe benötigt zusätzlich einen passenden E-AC-3/JOC-Transport, eine überprüfte Auswahl und eine unterstützte Anmeldung für Playlist und Segmente.
+
+## Angemeldeter HLS-Transport in Entwicklung
+
+`nativeAudioSession.js` verwendet ausschließlich den aktuell angemeldeten Jellyfin-Client und dessen vorhandenen SDK-Authorization-Header. Eine neue Anmeldung oder zusätzliche Tokenablage entsteht dadurch nicht. Die native Bindung muss Server, geladenen Hauptframe und Nutzer bestätigen. Ohne die explizite native Capability bleibt der bisherige mpv-Weg aktiv.
+
+Der Adapter übernimmt nur eine bereits ausgehandelte, ausgewählte interne E-AC-3-Spur in einer passenden HLS-Quelle. Medienquelle, Tonspurindex, Startposition und PlaySessionId bleiben erhalten. Eine zweite versteckte PlaybackInfo-Sitzung wird nicht erzeugt. Eine Copy-Anforderung und die JOC-Deklaration der Quelle sind noch kein Nachweis für die gelieferte oder gerenderte Atmos-Ausgabe. Widersprüchliche Kanal-, Abtastraten- und Bitratenvorgaben lehnt der Adapter ab.
+
+Der Header wird ausschließlich ephemer an `bindNativeAudioSession` übergeben; Ladeoptionen verwenden eine zufällige Bindungskennung. Vorhandene Query-Anmeldedaten auf der Quell-URL bleiben ein ausdrücklich zu schützender Teil des bestehenden Transports. Der Loopback-Transport darf sie weder offen in lokale URLs übernehmen noch an fremde Ziele weitergeben oder protokollieren. Abmelden und Nutzerwechsel über die Jellyfin-NativeShell-Hooks, Navigation, Stop, Timeout und ein Wechsel zum bisherigen Player verwerfen aktive und ausstehende Bindungen. Verspätete Rückmeldungen dürfen keine alte Wiedergabe starten.
+
+Dieser Schnitt ist noch nicht für den regulären Betrieb freigegeben. Die Tests des JavaScript-Vertrags ersetzen weder einen nativen App-Build noch die Wiedergabe über einen angemeldeten Jellyfin-Server.
+
+## Weitere Objektformate
+
+Für TrueHD/Atmos und DTS:X wird ein geeigneter Decoder mit Objektverarbeitung benötigt. Eine gewöhnliche Umwandlung nach E-AC-3 erzeugt keine metadatentreue Atmos-Quelle. Neue Komponenten werden erst nach Prüfung von Version, Lizenz, Synchronität und tatsächlichem Ausgabeweg eingebaut. Bisher wurde keine zusätzliche Bibliothek dafür aufgenommen. Dolby Vision wird getrennt für 0.4 entwickelt.
 
 ## Prüfungen
 

@@ -158,7 +158,9 @@ QString Paths::socketName(const QString& serverName)
   QString profileName = ProfileManager::activeProfile().name();
   if (profileName.isEmpty())
     profileName = "default";
-#ifdef Q_OS_MAC
+#if defined(Q_OS_MAC) && (defined(DEEPSTREAM_EXPERIMENTAL_AV_FIXTURE) || defined(DEEPSTREAM_HLS_CONTROLLED_MPV_TEST))
+  QString socketFile = QString("deepstream-av-fixture.%1.%2").arg(profileName, serverName);
+#elif defined(Q_OS_MAC)
   QString socketFile = QString("deepstream-pro.%1.%2").arg(profileName, serverName);
 #else
   QString socketFile = QString("jellyfin-desktop.%1.%2").arg(profileName, serverName);

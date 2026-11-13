@@ -4,11 +4,11 @@ async function tryConnect(server) {
             server = "http://" + server;
         }
 
-        console.log("Checking connectivity to:", server);
+        console.log("Checking server connectivity");
 
         const resolvedUrl = await window.jmpCheckServerConnectivity(server);
         console.log("Server connectivity check passed");
-        console.log("Resolved URL:", resolvedUrl);
+        console.log("Server redirect resolved");
 
         // Save original URL but navigate to fully-resolved redirect
         window.jmpInfo.settings.main.userWebClient = server;
@@ -18,7 +18,7 @@ async function tryConnect(server) {
 
         return true;
     } catch (e) {
-        console.error("Server connectivity check failed:", e);
+        console.error("Server connectivity check failed");
         return false;
     }
 }

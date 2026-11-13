@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepStream Pro · Filmansicht</title>
+<style>
+* {box-sizing:border-box} body {margin:0;font:16px -apple-system,BlinkMacSystemFont,sans-serif;background:#090909;color:#eee}
+.hide {display:none!important} .skinHeader {position:relative;z-index:2} .headerTop,.headerLeft,.headerRight,.headerTabs {display:flex;align-items:center}
+.headerRight {margin-left:auto} .headerTabs {gap:4px;margin-right:20px} .headerButton,.emby-tab-button {border:0;background:none;color:#ddd;padding:10px;cursor:pointer;font:inherit}
+.pageTitleWithLogo {background:#1596ba;padding:10px}.headerUserButton {border-radius:50%}.emby-tab-button-active {color:#00a4dc}
+.detailPagePrimaryContainer {display:block}.detailLogo {height:150px}.detailRibbon {background:#242424;padding:30px}.detailImageContainer {width:400px}
+.poster {aspect-ratio:2/3;background:radial-gradient(ellipse at 50% 20%,#6c7977,transparent 55%),linear-gradient(150deg,#192321,#070b0c 70%);display:flex;align-items:flex-end;padding:22px;font:700 23px/1.2 Georgia;color:#e8ded0;letter-spacing:2px}
+#itemBackdrop {background:radial-gradient(ellipse at 80% 20%,#626964,transparent 55%),linear-gradient(120deg,#101916,#333b35 70%,#0a0b0a)}
+.itemMiscInfo {display:flex;gap:12px;align-items:center;flex-wrap:wrap}.rating {border:1px solid #ffffff35;padding:1px 5px;border-radius:4px}
+.detailButton {border:0;background:none;color:inherit}.detailButton-icon {font-style:normal}.trackSelections {display:flex}.selectLabel {display:block} select {font:inherit}.overview {max-width:70ch}
+.detailSectionContent p:empty {display:none}.itemDetailsGroup {display:grid;grid-template-columns:100px 1fr;gap:8px}.itemDetailsGroup dt{color:#777}.itemDetailsGroup dd{margin:0}
+</style></head><body>
+<header class="skinHeader"><div class="headerTop"><div class="headerLeft"><button class="headerButton headerBackButton" aria-label="Zurück">‹</button><h3 class="pageTitle pageTitleWithLogo pageTitleWithDefaultLogo" aria-hidden="true">Altes Logo</h3></div><nav class="headerTabs"><button class="emby-tab-button">Favoriten</button><button class="emby-tab-button emby-tab-button-active">Filme</button><button class="emby-tab-button">Serien</button></nav><div class="headerRight"><button class="headerButton" aria-label="Suchen">⌕</button><button class="headerButton headerUserButton" aria-label="Profil">●</button></div></div></header>
+<main id="itemDetailPage" class="page libraryPage itemDetailPage noSecondaryNavPage selfBackdropPage"><div id="itemBackdrop" class="itemBackdrop"></div><div class="detailLogo">Zusätzliches Filmlogo</div>
+<div class="detailPageWrapperContainer"><div class="detailPagePrimaryContainer"><div class="detailImageContainer hide-mobile"><div class="card"><div class="poster">NACHTS<br>AM HORIZONT</div></div></div>
+<div class="detailRibbon"><div class="infoWrapper"><div class="nameContainer"><h1 class="itemName">Nachts am Horizont</h1></div><div class="itemMiscInfo itemMiscInfo-primary"><span>2026</span><span>1 Std. 52 Min.</span><span class="rating">FSK 12</span><span>★ 8,2</span><span>Drama</span></div></div>
+<div class="mainDetailButtons"><button class="btnPlay detailButton" aria-label="Abspielen"><span class="detailButton-content"><span class="detailButton-icon">▶</span></span></button><button class="btnPlayTrailer detailButton" aria-label="Trailer">▤</button><button class="detailButton" aria-label="Zur Merkliste">＋</button><button class="detailButton" aria-label="Als gesehen markieren">✓</button><button class="detailButton" aria-label="Weitere Aktionen">⋯</button><button class="btnDownload detailButton hide" aria-label="Download">↓</button></div></div>
+<div class="detailPagePrimaryContent padded-right"><div class="detailSection"><form class="trackSelections">
+<div class="selectContainer selectSourceContainer trackSelectionFieldContainer hide"><label class="selectLabel" for="source">Version</label><select id="source" class="selectSource detailTrackSelect"><option value="fixture-a">Original</option></select></div>
+<div class="selectContainer selectVideoContainer trackSelectionFieldContainer"><label class="selectLabel" for="video">Video</label><select id="video" class="selectVideo detailTrackSelect" disabled><option>4K HEVC · Dolby Vision · HDR10</option></select></div>
+<div class="selectContainer selectAudioContainer trackSelectionFieldContainer"><label class="selectLabel" for="audio">Tonspur</label><select id="audio" class="selectAudio detailTrackSelect"><option value="2">Deutsch · Dolby TrueHD / Dolby Atmos · 7.1 · 24 Bit</option><option value="5">Deutsch · Dolby Digital Plus · 5.1</option></select></div>
+<div class="selectContainer selectSubtitlesContainer trackSelectionFieldContainer"><label class="selectLabel" for="subtitles">Untertitel</label><select id="subtitles" class="selectSubtitles detailTrackSelect"><option>Aus</option></select></div></form>
+<div class="detailSectionContent"><h3 class="tagline">Manche Wege beginnen erst nach Sonnenuntergang.</h3><p class="overview">Eine Begegnung auf der letzten Fähre verändert die Reise zweier Fremder. Während hinter ihnen die Küste verschwindet, müssen beide entscheiden, wohin sie zurückkehren wollen.</p></div><dl class="itemDetailsGroup"><dt>Regie</dt><dd>Erzeugte Prüfmetadaten</dd><dt>Genre</dt><dd>Drama · Abenteuer</dd></dl>
+</div></div></div><div class="detailPageSecondaryContainer"><h2 class="sectionTitle">Mehr entdecken</h2></div></div></main>
+<script>
+window.jmpInfo = window.jmpInfo || {scriptPath:'/native',settings:{audio:{streamSelection:'auto',spatialAudio:true,devicetype:'basic',device:'auto',channels:'auto',exclusive:false},other:{}}};
+window.ApiClient = {getCurrentUserId:()=> 'generated-user',getItem:async()=>({MediaSources:[{Id:'fixture-a',DefaultAudioStreamIndex:2,MediaStreams:[{Type:'Audio',Index:2,Codec:'truehd',Profile:'Dolby TrueHD + Dolby Atmos',Language:'deu',Channels:8,ChannelLayout:'7.1',BitRate:5600000,SampleRate:48000,BitDepth:24},{Type:'Audio',Index:5,Codec:'eac3',Language:'deu',Channels:6,BitRate:640000,SampleRate:48000}]}]})};
+if (!window.NativeShell) {
+ window.initCompleted=Promise.resolve();
+ window._mpvVideoPlayer=function(){};window._mpvVideoPlayer.prototype.readAudioPlayerInfo=async()=>({decoderEnumerationAvailable:true,decoders:['truehd','eac3']});
+ for(const name of ['audioEngine','deepstreamTheme','audioDetails']) {const script=document.createElement('script');script.src='/native/'+name+'.js';script.async=false;document.head.append(script);}
+}
+location.hash='#/details?id=generated-film-view';
+</script></body></html>

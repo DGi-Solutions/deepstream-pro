@@ -4,6 +4,7 @@ import QtWebEngine
 import QtWebChannel
 import QtQuick.Window
 import QtQuick.Controls
+import QtQuick.Dialogs as Dialogs
 import Qt.labs.platform as Labs
 
 Window
@@ -29,6 +30,316 @@ Window
                                     components.settings.windowsTrayIcon
 
   signal reloadWebClient()
+
+  // Local-file flow. This uses the existing player rather
+  // than starting a second decoder beside a Jellyfin session.
+  // Local-file playback remains under development for the next release.
+  readonly property bool localMediaEnabled: false
+  property bool localMediaActive: false
+  property bool localMediaPaused: false
+  property string localMediaError: ""
+  property string localTrackFingerprint: ""
+  property string localSubtitleDialogToken: ""
+  property string localDropToken: ""
+
+  LocalMediaController {
+    id: localMediaController
+    onInvalidated: {
+      mainWindow.localMediaActive = false
+      components.player.setVideoOnlyMode(false)
+    }
+    onStartupFailed: cancelled => mainWindow.handleLocalStartupFailure(cancelled)
+  }
+  ListModel { id: localAudioTracks }
+  ListModel { id: localSubtitleTracks }
+
+  function closeLocalMedia() {
+    if (!localMediaActive) return
+    if (!localMediaController.close()) {
+      localMediaError = qsTr("Die Wiedergabe konnte noch nicht sicher beendet werden.")
+      return
+    }
+    localMediaActive = false
+    components.player.setVideoOnlyMode(false)
+  }
+
+  function handleLocalStartupFailure(cancelled) {
+    localMediaError = qsTr("Die Datei konnte nicht wiedergegeben werden.")
+    if (!cancelled) return
+    localMediaActive = false
+    components.player.setVideoOnlyMode(false)
+  }
+
+  function openLocalMedia(fileUrl) {
+    if (!localMediaEnabled) return false
+    const localUrl = String(fileUrl)
+    if (!localUrl.toLowerCase().startsWith("file://")) {
+      localMediaError = qsTr("Die Datei konnte nicht geöffnet werden.")
+      return false
+    }
+    const accepted = localMediaController.open(fileUrl)
+    if (!accepted) {
+      localMediaError = qsTr("Die Datei konnte nicht geöffnet werden.")
+      return false
+    }
+    localMediaError = ""
+    localMediaPaused = false
+    localMediaActive = true
+    localTrackFingerprint = ""
+    localAudioTracks.clear()
+    localSubtitleTracks.clear()
+    components.player.setVideoOnlyMode(true)
+    return true
+  }
+
+  function openLocalSubtitleDialog() {
+    if (!localMediaEnabled) return false
+    const token = localMediaController.subtitleDialogToken()
+    if (token === "") return false
+    localSubtitleDialogToken = token
+    localSubtitleDialog.open()
+    return true
+  }
+
+  function acceptLocalSubtitle(fileUrl) {
+    if (!localMediaEnabled) return false
+    const token = localSubtitleDialogToken
+    localSubtitleDialogToken = ""
+    if (!localMediaController.addSubtitleFile(fileUrl, token)) {
+      localMediaError = qsTr("Die Untertiteldatei konnte nicht geöffnet werden.")
+      return false
+    }
+    return true
+  }
+
+  function revealLocalControl(control) {
+    const left = control.mapToItem(localMediaScroll.contentItem, 0, 0).x
+    const right = left + control.width
+    const viewLeft = localMediaScroll.contentX
+    const viewRight = viewLeft + localMediaScroll.width
+    let target = viewLeft
+    if (left < viewLeft || control.width > localMediaScroll.width) target = left
+    else if (right > viewRight) target = right - localMediaScroll.width
+    localMediaScroll.contentX = Math.max(0, Math.min(target,
+      Math.max(0, localMediaScroll.contentWidth - localMediaScroll.width)))
+  }
+
+  function localDropFile(event) {
+    if (!localMediaEnabled) return null
+    if (!event || !event.hasUrls || event.urls.length !== 1 ||
+        !(event.supportedActions & Qt.CopyAction)) return null
+    const url = event.urls[0]
+    return localMediaController.canDropFile(url) ? url : null
+  }
+
+  function beginLocalDrop(event) {
+    event.accepted = false
+    localDropToken = ""
+    if (localDropFile(event) === null) return false
+    const token = localMediaController.dropInteractionToken()
+    if (token === "") return false
+    localDropToken = token
+    event.accept(Qt.CopyAction)
+    return true
+  }
+
+  function finishLocalDrop(event) {
+    event.accepted = false
+    const token = localDropToken
+    localDropToken = ""
+    if (token === "" || token !== localMediaController.dropInteractionToken()) return false
+    const url = localDropFile(event)
+    if (url === null || !openLocalMedia(url)) return false
+    event.accept(Qt.CopyAction)
+    return true
+  }
+
+  DropArea {
+    id: localMediaDropArea
+    enabled: mainWindow.localMediaEnabled
+    anchors.fill: parent
+    z: 150
+    onEntered: drag => mainWindow.beginLocalDrop(drag)
+    onExited: mainWindow.localDropToken = ""
+    onDropped: drop => mainWindow.finishLocalDrop(drop)
+  }
+
+  Dialogs.FileDialog {
+    id: localMediaDialog
+    title: qsTr("Mediendatei öffnen")
+    fileMode: Dialogs.FileDialog.OpenFile
+    onAccepted: mainWindow.openLocalMedia(selectedFile)
+  }
+
+  Dialogs.FileDialog {
+    id: localSubtitleDialog
+    title: qsTr("Untertiteldatei öffnen")
+    fileMode: Dialogs.FileDialog.OpenFile
+    nameFilters: [qsTr("Untertiteldateien (*.srt *.vtt *.ass *.ssa *.sub *.sup)"),
+                  qsTr("Alle Dateien (*)")]
+    onAccepted: mainWindow.acceptLocalSubtitle(selectedFile)
+    onRejected: mainWindow.localSubtitleDialogToken = ""
+  }
+
+  Labs.MenuBar {
+    window: mainWindow
+    Labs.Menu {
+      visible: mainWindow.localMediaEnabled
+      enabled: mainWindow.localMediaEnabled
+      title: qsTr("Datei")
+      Labs.MenuItem {
+        text: qsTr("Datei öffnen …")
+        enabled: mainWindow.localMediaEnabled
+        shortcut: StandardKey.Open
+        onTriggered: localMediaDialog.open()
+      }
+    }
+  }
+
+  Rectangle {
+    id: localMediaControls
+    z: 200
+    visible: mainWindow.localMediaEnabled && mainWindow.localMediaActive
+    anchors.left: parent.left
+    anchors.right: parent.right
+    anchors.bottom: parent.bottom
+    height: Math.max(72, localControlsRow.implicitHeight + 28)
+    color: "#dd181818"
+    Flickable {
+      id: localMediaScroll
+      anchors.fill: parent
+      contentWidth: localControlsRow.implicitWidth + 20
+      contentHeight: height
+      flickableDirection: Flickable.HorizontalFlick
+      boundsBehavior: Flickable.StopAtBounds
+      clip: true
+      ScrollBar.horizontal: ScrollBar {
+        policy: ScrollBar.AlwaysOn
+        interactive: true
+        Accessible.name: qsTr("Wiedergabesteuerung verschieben")
+      }
+      Row {
+        id: localControlsRow
+        x: 10
+        y: 8
+        spacing: 10
+        Button {
+        id: localMediaPause
+        text: mainWindow.localMediaPaused ? qsTr("Fortsetzen") : qsTr("Pause")
+        onActiveFocusChanged: if (activeFocus) mainWindow.revealLocalControl(localMediaPause)
+        onClicked: {
+          if (mainWindow.localMediaPaused) localMediaController.play()
+          else localMediaController.pause()
+        }
+      }
+      Slider {
+        id: localMediaSeek
+        width: Math.max(100, localMediaControls.width - 800)
+        from: 0
+        to: 1
+        Accessible.name: qsTr("Wiedergabeposition")
+        onActiveFocusChanged: if (activeFocus) mainWindow.revealLocalControl(localMediaSeek)
+        onMoved: localMediaController.seek(Math.round(value))
+      }
+      Slider {
+        id: localMediaVolume
+        width: 100
+        from: 0
+        to: 100
+        value: 100
+        Accessible.name: qsTr("Lautstärke")
+        onActiveFocusChanged: if (activeFocus) mainWindow.revealLocalControl(localMediaVolume)
+        onMoved: localMediaController.volume(Math.round(value))
+      }
+      ComboBox {
+        id: localAudioSelect
+        width: 120
+        model: localAudioTracks
+        textRole: "label"
+        enabled: count > 0
+        onActivated: index => localMediaController.selectTrack("audio", localAudioTracks.get(index).trackId)
+        Accessible.name: qsTr("Tonspur")
+        onActiveFocusChanged: if (activeFocus) mainWindow.revealLocalControl(localAudioSelect)
+      }
+      ComboBox {
+        id: localSubtitleSelect
+        width: 120
+        model: localSubtitleTracks
+        textRole: "label"
+        enabled: count > 0
+        onActivated: index => localMediaController.selectTrack("sub", localSubtitleTracks.get(index).trackId)
+        Accessible.name: qsTr("Untertitel")
+        onActiveFocusChanged: if (activeFocus) mainWindow.revealLocalControl(localSubtitleSelect)
+      }
+      Button {
+        id: localSubtitleOpen
+        text: qsTr("Untertitel öffnen")
+        onActiveFocusChanged: if (activeFocus) mainWindow.revealLocalControl(localSubtitleOpen)
+        onClicked: mainWindow.openLocalSubtitleDialog()
+      }
+      Button {
+        id: localFileOpen
+        text: qsTr("Datei öffnen")
+        onActiveFocusChanged: if (activeFocus) mainWindow.revealLocalControl(localFileOpen)
+        onClicked: localMediaDialog.open()
+      }
+      Button {
+        id: localMediaClose
+        text: qsTr("Schließen")
+        onActiveFocusChanged: if (activeFocus) mainWindow.revealLocalControl(localMediaClose)
+        onClicked: mainWindow.closeLocalMedia()
+      }
+      }
+    }
+    Timer {
+      interval: 500
+      repeat: true
+      running: mainWindow.localMediaActive
+      onTriggered: {
+        const current = localMediaController.state()
+        if (!current.active || !current.ready) return
+        localMediaSeek.to = Math.max(1, current.duration)
+        if (!localMediaSeek.pressed) localMediaSeek.value = current.position
+        if (!localMediaVolume.pressed) localMediaVolume.value = current.volume
+        mainWindow.localMediaPaused = current.paused
+        const fingerprint = JSON.stringify(current.tracks)
+        if (fingerprint !== mainWindow.localTrackFingerprint) {
+          mainWindow.localTrackFingerprint = fingerprint
+          localAudioTracks.clear()
+          localSubtitleTracks.clear()
+          localSubtitleTracks.append({label: qsTr("Aus"), trackId: -1})
+          let selectedAudio = -1
+          let selectedSubtitle = 0
+          for (const track of current.tracks) {
+            const label = (track.language || qsTr("Unbekannt")) + " · " + (track.codec || qsTr("Spur")) + " #" + track.id
+            if (track.type === "audio") {
+              localAudioTracks.append({label: label, trackId: track.id})
+              if (track.selected) selectedAudio = localAudioTracks.count - 1
+            } else if (track.type === "sub") {
+              localSubtitleTracks.append({label: label, trackId: track.id})
+              if (track.selected) selectedSubtitle = localSubtitleTracks.count - 1
+            }
+          }
+          localAudioSelect.currentIndex = selectedAudio
+          localSubtitleSelect.currentIndex = selectedSubtitle
+        }
+      }
+    }
+  }
+
+  Rectangle {
+    z: 201
+    visible: mainWindow.localMediaError !== ""
+    anchors.horizontalCenter: parent.horizontalCenter
+    anchors.top: parent.top
+    anchors.topMargin: 20
+    width: localErrorText.implicitWidth + 80
+    height: localErrorText.implicitHeight + 24
+    radius: 7
+    color: "#dd242424"
+    Text { id: localErrorText; anchors.centerIn: parent; color: "white"; text: mainWindow.localMediaError }
+    MouseArea { anchors.fill: parent; onClicked: mainWindow.localMediaError = "" }
+  }
 
   Component.onCompleted: {
     if (components && components.settings) {
@@ -240,6 +551,7 @@ Window
   {
     id: web
     objectName: "web"
+    property bool nativeHlsMainFrameReady: false
     width: mainWindow.width
     height: mainWindow.height
     z: 100
@@ -247,7 +559,7 @@ Window
 
     // this is needed to prevent intermittent(?) black screens when unminizing
     // or resumsing from suspend (linux/{x11/wayland}, possibly others).
-    layer.enabled: true
+    layer.enabled: !components.player.avFixtureVideoActive
 
     webChannel: webChannelObject
     settings.errorPageEnabled: false
@@ -277,7 +589,7 @@ Window
       // Handle CSP workaround from C++
       components.system.pageContentReady.connect(function(html, finalUrl, hadCSP) {
         if (hadCSP) {
-          console.log("CSP workaround: navigating to", finalUrl);
+          console.log("CSP workaround: navigating");
           web.url = finalUrl;
         }
       })
@@ -319,16 +631,21 @@ Window
       //
       if (loadingInfo.status == WebEngineView.LoadStartedStatus)
       {
-        console.log("WebEngineLoadRequest starting: " + loadingInfo.url);
+        web.nativeHlsMainFrameReady = false
+        if (components.player && components.player.clearNativeAudioSession) components.player.clearNativeAudioSession()
+        console.log("WebEngineLoadRequest starting");
       }
       else if (loadingInfo.status == WebEngineView.LoadSucceededStatus)
       {
-        console.log("WebEngineLoadRequest success: " + loadingInfo.url);
+        web.nativeHlsMainFrameReady = true
+        console.log("WebEngineLoadRequest success");
         Qt.callLater(reapplyTransparentBackground);
       }
       else if (loadingInfo.status == WebEngineView.LoadFailedStatus)
       {
-        console.log("WebEngineLoadRequest failure: " + loadingInfo.url + " error code: " + loadingInfo.errorCode);
+        web.nativeHlsMainFrameReady = false
+        if (components.player && components.player.clearNativeAudioSession) components.player.clearNativeAudioSession()
+        console.log("WebEngineLoadRequest failure, error code: " + loadingInfo.errorCode);
         errorLabel.visible = true
         errorLabel.text = "Error loading client, this is bad and should not happen<br>" +
                           "You can try to <a href='reload'>reload</a> or head to our <a href='http://jellyfin.org'>support page</a><br><br>Actual Error: <pre>" +
@@ -341,7 +658,7 @@ Window
     {
       if (request.userInitiated)
       {
-        console.log("Opening external URL: " + web.currentHoveredUrl)
+        console.log("Opening external URL")
         components.system.openExternalUrl(web.currentHoveredUrl)
       }
     }
@@ -355,12 +672,12 @@ Window
 
     onJavaScriptConsoleMessage: function(level, message, lineNumber, sourceID)
     {
-      components.system.jsLog(level, sourceID + ":" + lineNumber + " " + message);
+      components.system.jsLog(level, "WebEngine JavaScript console event, line " + lineNumber);
     }
 
     onCertificateError: function(error)
     {
-      console.log(error.url + " :" + error.description + error.error)
+      console.log("Certificate error code: " + error.error)
       if (components.settings.ignoreSSLErrors()) {
         error.acceptCertificate()
       }

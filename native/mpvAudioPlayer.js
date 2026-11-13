@@ -82,7 +82,7 @@ class mpvAudioPlayer {
             return new Promise((resolve) => {
                 const val = options.url;
                 self._currentSrc = val;
-                console.debug('playing url: ' + val);
+                console.debug('[MPV] Audio playback requested');
 
                 // Convert to seconds
                 const ms = (options.playerStartPositionTicks || 0) / 10000;

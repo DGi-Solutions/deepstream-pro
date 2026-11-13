@@ -1,0 +1,15 @@
+# DeepStream Pro 0.4: HDR und Dolby Vision – Planung
+
+Status: Planung. Das derzeitige Auslesen von Dolby-Vision-Metadaten und die Wiedergabe einer 10-Bit-Quelle belegen keine vollständige Dolby-Vision- oder HDR-Ausgabe.
+
+1. **Quellen und Erkennung.** Öffentlich nutzbare oder selbst erstellte Prüfmuster für SDR, HDR10 und Dolby Vision mit getrennt dokumentierten Profilen und Containern beschaffen. Profil 8.1 priorisieren; 5 und 8.4 separat prüfen. Bitstream-Metadaten und Jellyfin-Angaben vergleichen. Fehlende Metadaten ausdrücklich als unbekannt kennzeichnen. Kein Profil allein aus einem Dateinamen ableiten.
+2. **Ausgabeweg nachweisen.** Vorhandenen libmpv-/Qt-/OpenGL-Weg hinsichtlich Dynamikumfang, Farbraum, Transfertyp und Umgang mit dynamischen Metadaten instrumentieren. Alternative native Ausgabe mit Apples dokumentierter EDR-/Metal- oder AVFoundation-Schnittstelle als Prototyp evaluieren; Wechsel nur nach Vergleich von Bildqualität, Stabilität und Funktionsumfang. Der Nachweis eines 10-Bit-Puffers allein reicht nicht.
+3. **Anzeigen und Rückfall.** Das tatsächlich gewählte Display und dessen EDR-Eignung erkennen. Bei HDR10-Basislayer korrekt auf diesen zurückfallen, soweit im jeweiligen Profil vorhanden; für inkompatible Quellen und SDR-Displays einen eindeutig angezeigten, korrekten SDR-Tonemapping-Weg prüfen. Kein pauschaler Fallback für Profile ohne kompatiblen HDR10-Basislayer.
+4. **Geräte- und Referenztests.** Auf einem verfügbaren MacBook Pro mit PROLED XDR und mindestens einer weiteren HDR-Konfiguration messen und visuell gegen einen geeigneten Referenzplayer/Referenzbilder vergleichen: Schwarzwert, Highlights, Farbverlauf, Banding, Bildwiederholrate, Untertitel und Umschalten von Fenstern und Displays. Verfügbarkeit des Zielgeräts ist zu bestätigen. Energiesparmodus, Bildschirmhelligkeit und Displaymodus dokumentieren; Helligkeits-/Farbnachweise nicht aus Screenshots allein ableiten.
+5. **Dynamische Metadaten und Profilmatrix.** Für jeden tatsächlich geprüften Pfad getrennt dokumentieren, ob dynamische Dolby-Vision-Metadaten erkannt und für die Bildverarbeitung nachweisbar genutzt werden, ob nur der kompatible Basislayer wiedergegeben wird oder ob die Verarbeitung unbekannt ist. Anforderungen und eventuelle Lizenzierung für native Dolby-Vision-Ausgabe prüfen; Begriffe und Logos erst nach Prüfung verwenden.
+6. **Freigabekriterien.** Pro Profil, Container, Chip, macOS-Version und Display einen reproduzierbaren Prüfbericht führen. Stabiler 10-Bit-HDR-Bildweg und die tatsächlich erreichte Metadatenverarbeitung sind jeweils separat zu belegen; unbekannte oder nicht getestete Kombinationen bleiben als solche gekennzeichnet. Keine privaten Medien oder persönlichen Testdaten in öffentliche Artefakte übernehmen.
+
+Technische Referenzen:
+- Apple, PROLED XDR Display: https://www.apple.com/newsroom/2026/10/apple-unveils-groundbreaking-macbook-pro-with-proled-xdr-display/
+- Apple Developer, HDR und EDR: https://developer.apple.com/documentation/metal/hdr-content
+- Apple, Dolby Vision und HDR-Metadaten: https://developer.apple.com/av-foundation/High-Dynamic-Range-Metadata-for-Apple-Devices.pdf

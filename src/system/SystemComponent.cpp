@@ -63,7 +63,7 @@ SystemComponent::SystemComponent(QObject* parent) : ComponentBase(parent), m_pla
   m_connectivityRetryTimer = new QTimer(this);
   m_connectivityRetryTimer->setSingleShot(true);
   connect(m_connectivityRetryTimer, &QTimer::timeout, [this]() {
-    qInfo() << "Retrying connectivity check for" << m_pendingConnectivityUrl;
+    qInfo() << "Retrying connectivity check";
     checkServerConnectivity(m_pendingConnectivityUrl);
   });
 
@@ -285,9 +285,10 @@ void SystemComponent::resolveUrl(const QString& url, std::function<void(const QS
 {
   // Abort any pending resolve
   if (m_resolveUrlReply) {
-    m_resolveUrlReply->abort();
-    m_resolveUrlReply->deleteLater();
+    QNetworkReply* oldReply = m_resolveUrlReply;
     m_resolveUrlReply = nullptr;
+    oldReply->abort();
+    oldReply->deleteLater();
   }
 
   QNetworkRequest request(url);
@@ -314,7 +315,7 @@ void SystemComponent::resolveUrl(const QString& url, std::function<void(const QS
     }
 
     if (reply->error() != QNetworkReply::NoError) {
-      qWarning() << "resolveUrl: error:" << reply->errorString();
+      qWarning() << "resolveUrl: error code:" << static_cast<int>(reply->error());
     }
 
     callback(reply->url().toString());
@@ -328,15 +329,19 @@ void SystemComponent::resolveUrl(const QString& url, std::function<void(const QS
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void SystemComponent::checkServerConnectivity(QString url)
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND) && defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+  m_verifiedHlsBase=QUrl();m_verifiedHlsServerId.clear();emit nativeHlsTrustChanged();
+#endif
   // Stop any pending retry
   if (m_connectivityRetryTimer->isActive()) {
     m_connectivityRetryTimer->stop();
   }
 
   if (m_connectivityCheckReply) {
-    m_connectivityCheckReply->abort();
-    m_connectivityCheckReply->deleteLater();
+    QNetworkReply* oldReply = m_connectivityCheckReply;
     m_connectivityCheckReply = nullptr;
+    oldReply->abort();
+    oldReply->deleteLater();
   }
 
   // Store for retry
@@ -378,11 +383,21 @@ void SystemComponent::checkServerConnectivity(QString url)
         QJsonDocument doc = QJsonDocument::fromJson(data);
         if (doc.isObject() && doc.object().contains("Id") && !doc.object()["Id"].toString().isEmpty()) {
           success = true;
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND) && defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+          const QUrl base(extractBaseUrl(fullResolvedUrl),QUrl::StrictMode);
+          const QUrl actual=reply->url();
+          const auto port=[](const QUrl& v){return v.port(v.scheme().compare(QStringLiteral("https"),Qt::CaseInsensitive)==0?443:80);};
+          if(reply==m_connectivityCheckReply && base.isValid() && !base.host().isEmpty() && base.userInfo().isEmpty() &&
+             !base.hasQuery() && !base.hasFragment() && actual.scheme().compare(base.scheme(),Qt::CaseInsensitive)==0 &&
+             actual.host().compare(base.host(),Qt::CaseInsensitive)==0 && port(actual)==port(base)) {
+            m_verifiedHlsBase=base;m_verifiedHlsServerId=doc.object()["Id"].toString();
+          }
+#endif
         } else {
           qWarning() << "checkServerConnectivity: invalid response";
         }
       } else {
-        qWarning() << "checkServerConnectivity: error:" << reply->errorString();
+        qWarning() << "checkServerConnectivity: error code:" << static_cast<int>(reply->error());
       }
 
       if (success) {
@@ -404,6 +419,9 @@ void SystemComponent::checkServerConnectivity(QString url)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void SystemComponent::cancelServerConnectivity()
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND) && defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+  m_verifiedHlsBase=QUrl();m_verifiedHlsServerId.clear();emit nativeHlsTrustChanged();
+#endif
   if (m_connectivityRetryTimer->isActive()) {
     m_connectivityRetryTimer->stop();
   }
@@ -550,6 +568,15 @@ QString SystemComponent::getNativeShellScript()
   qDebug() << QString("Using path for extension: %1").arg(path);
 
   QJsonObject clientData;
+  QJsonObject brandImages;
+  for (const auto& entry : {qMakePair(QStringLiteral("app"), QStringLiteral("deepstream-pro.png")),
+                            qMakePair(QStringLiteral("company"), QStringLiteral("dgi-solutions-logo.png"))})
+  {
+    QFile image(QStringLiteral(":/web-client/extension/") + entry.second);
+    if (image.open(QIODevice::ReadOnly))
+      brandImages.insert(entry.first, QStringLiteral("data:image/png;base64,") + QString::fromLatin1(image.readAll().toBase64()));
+  }
+  clientData.insert("brandImages", brandImages);
   clientData.insert("deviceName", QJsonValue::fromVariant(SettingsComponent::Get().getClientName()));
   clientData.insert("version", QJsonValue::fromVariant(Version::GetVersionString()));
   clientData.insert("userAgent", QJsonValue::fromVariant(getUserAgent()));
@@ -594,14 +621,26 @@ QString SystemComponent::getNativeShellScript()
 
   QStringList scriptPaths = {
     ":/qtwebchannel/qwebchannel.js",
+    ":/web-client/extension/locale.js",
     ":/web-client/extension/audioEngine.js",
+    ":/web-client/extension/audioEnhancements.js",
     ":/web-client/extension/deepstreamTheme.js",
+    ":/web-client/extension/nativeAudioSession.js",
+    ":/web-client/extension/nativeAudioProfile.js",
+    ":/web-client/extension/nativeAudioNegotiation.js",
+    ":/web-client/extension/dolbyVisionSelection.js",
+    ":/web-client/extension/dolbyVisionSessionBridge.js",
+    ":/web-client/extension/formatActivationToast.js",
     ":/web-client/extension/mpvVideoPlayer.js",
     ":/web-client/extension/mpvAudioPlayer.js",
     ":/web-client/extension/inputPlugin.js",
     ":/web-client/extension/updatePlugin.js",
     ":/web-client/extension/connectivityHelper.js",
     ":/web-client/extension/nativeshell.js",
+    ":/web-client/extension/spatialAudioControl.js",
+    ":/web-client/extension/artworkCache.js",
+    ":/web-client/extension/artwork.js",
+    ":/web-client/extension/videoDetails.js",
     ":/web-client/extension/audioDetails.js"
   };
 
@@ -616,7 +655,7 @@ QString SystemComponent::getNativeShellScript()
 /////////////////////////////////////////////////////////////////////////////////////////
 void SystemComponent::fetchPageForCSPWorkaround(QString url)
 {
-  qDebug() << "fetchPageForCSPWorkaround:" << url;
+  qDebug() << "fetchPageForCSPWorkaround started";
 
   QNetworkRequest request(url);
   request.setHeader(QNetworkRequest::UserAgentHeader, getUserAgent());
@@ -636,7 +675,7 @@ void SystemComponent::fetchPageForCSPWorkaround(QString url)
   if (SettingsComponent::Get().ignoreSSLErrors()) {
     connect(reply, QOverload<const QList<QSslError>&>::of(&QNetworkReply::sslErrors),
             this, [reply](const QList<QSslError>& errors) {
-      qDebug() << "fetchPageForCSPWorkaround: ignoring SSL errors:" << errors;
+      qDebug() << "fetchPageForCSPWorkaround: ignoring SSL errors, count:" << errors.size();
       reply->ignoreSslErrors();
     });
   }
@@ -661,14 +700,14 @@ void SystemComponent::fetchPageForCSPWorkaround(QString url)
       }
 
       if (hadCSP) {
-        qInfo() << "CSP workaround: applying for" << url;
+        qInfo() << "CSP workaround: applying";
       } else {
-        qDebug() << "No CSP detected for" << url;
+        qDebug() << "No CSP detected";
       }
 
       emit pageContentReady(html, finalUrl, hadCSP);
     } else {
-      qCritical() << "fetchPageForCSPWorkaround: fetch failed:" << reply->errorString();
+      qCritical() << "fetchPageForCSPWorkaround: fetch failed, error code:" << static_cast<int>(reply->error());
     }
     reply->deleteLater();
   });
@@ -681,7 +720,7 @@ void SystemComponent::checkForUpdates()
   if (SettingsComponent::Get().value(SETTINGS_SECTION_MAIN, "checkForUpdates").toBool()) {
 #if !defined(Q_OS_WIN) && !defined(Q_OS_MAC)
     QNetworkAccessManager *manager = new QNetworkAccessManager(this);
-    QString checkUrl = "https://github.com/jellyfin/jellyfin-desktop/releases/latest";
+    QString checkUrl = "https://github.com/DGi-Solutions/deepstream-pro/releases/latest";
     QUrl qCheckUrl = QUrl(checkUrl);
     qDebug() << QString("Checking URL for updates: %1").arg(checkUrl);
     QNetworkRequest req(qCheckUrl);

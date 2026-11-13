@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const {model, createLoader, rate, bitrate, readSettings} = require('../native/audioDetails.js');
+const {model, createLoader, rate, bitrate, readSettings, trackLabel, artworkSources, isMediaPage} = require('../native/audioDetails.js');
 const caps = {decoderEnumerationAvailable: true, decoders: ['truehd', 'eac3', 'aac'], objectAudioRoutes: []};
 const spatialSettings = {streamSelection: 'auto', spatialAudio: true, devicetype: 'basic', device: 'auto', channels: 'auto', exclusive: false};
 const source = {Id: 'synthetic-a', DefaultAudioStreamIndex: 2, MediaStreams: [
@@ -10,6 +10,27 @@ const source = {Id: 'synthetic-a', DefaultAudioStreamIndex: 2, MediaStreams: [
 ]};
 const view = overrides => model({source, selectedIndex: 2, settings: spatialSettings, capabilities: caps, ...overrides});
 const rows = value => Object.fromEntries(value.rows);
+const cleanLabel = trackLabel({...source.MediaStreams[1], Title: 'TrueHD Atmos 7.1 mixed by Teststudio', DisplayTitle: 'mixed by Teststudio'});
+assert.equal(cleanLabel, 'Deutsch · TrueHD / Atmos · 7.1 · 48 kHz · 24 Bit · 5,6 Mbit/s');
+assert.equal(cleanLabel.includes('Teststudio'), false);
+const imageCalls = [];
+const imageApi = {getScaledImageUrl(id, options) {
+    imageCalls.push({id, ...options});
+    const path = '/Items/' + id + '/Images/' + options.type + (options.index == null ? '' : '/' + options.index);
+    delete options.type; delete options.index;
+    return path;
+}};
+assert.deepEqual(artworkSources(imageApi, {Id: 'film', BackdropImageTags: ['film-tag'], ParentBackdropItemId: 'series', ParentBackdropImageTags: ['series-tag'], ImageTags: {Primary: 'cover-tag'}}),
+    ['/Items/film/Images/Backdrop/0', '/Items/series/Images/Backdrop/0', '/Items/film/Images/Primary']);
+assert.equal(imageCalls[0].index, 0, 'backdrops use the indexed server endpoint');
+assert.equal(imageCalls[1].tag, 'series-tag');
+assert.deepEqual(artworkSources(imageApi, {Id: 'film', BackdropImageTags: ['first', 'second', 'first']}), ['/Items/film/Images/Backdrop/0', '/Items/film/Images/Backdrop/1'], 'use distinct available motifs and exclude repeated image tags');
+assert.deepEqual(artworkSources(imageApi, {Id: 'episode', ParentBackdropItemId: 'series', ParentBackdropImageTags: ['series-tag']}), ['/Items/series/Images/Backdrop/0']);
+assert.deepEqual(artworkSources(imageApi, {Id: 'no-images'}), [], 'do not invent image requests when the server reports no artwork');
+assert.equal(isMediaPage({Type: 'Movie'}), true);
+assert.equal(isMediaPage({Type: 'Episode'}), true);
+assert.equal(isMediaPage({Type: 'Person'}), false, 'film artwork and hidden-poster styling must not apply to actor portraits');
+assert.deepEqual(artworkSources({getScaledImageUrl() {throw new Error('unsupported helper');}, getImageUrl(id, options) {return id + ':' + options.type + ':' + options.index;}}, {Id: 'film', BackdropImageTags: ['tag']}), ['film:Backdrop:0']);
 let result = view();
 assert.equal(result.title, 'TrueHD / Atmos');
 assert.equal(rows(result)['Sprache'], 'Deutsch');

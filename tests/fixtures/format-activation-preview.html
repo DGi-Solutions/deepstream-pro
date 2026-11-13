@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>DeepStream Pro – synthetische Anzeigevorschau</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;background:#0a0a0a;color:#f7f3ed;font-family:-apple-system,BlinkMacSystemFont,sans-serif}
+    .label{display:block;padding:14px 6vw;background:#1a1712;color:#eac489;font-size:13px;font-weight:650;letter-spacing:.04em}
+    .page{min-height:calc(100vh - 44px);padding:34px 6vw 70px;background:radial-gradient(ellipse at 78% 25%,#2a231b 0,#151310 31%,#0a0a0a 67%)}
+    nav{font-weight:700;font-size:17px;color:#eed0a0;letter-spacing:.02em}.hero{max-width:560px;padding-top:clamp(80px,18vh,180px)}
+    .eyebrow{color:#c5b69e;font-size:13px;text-transform:uppercase;letter-spacing:.13em}h1{font-size:clamp(38px,6vw,68px);letter-spacing:-.04em;line-height:1.04;margin:14px 0}
+    p{color:#bfb9ae;line-height:1.5} .controls{display:flex;flex-wrap:wrap;gap:10px;margin-top:32px}
+    button{border:1px solid #5b4c35;border-radius:10px;background:#201b16;color:#f1dcc0;font:600 14px -apple-system,BlinkMacSystemFont,sans-serif;padding:12px 16px;cursor:pointer}
+    button:hover,button:focus-visible{background:#33291e;outline:2px solid #dab67c;outline-offset:2px}
+    #state{margin-top:18px;min-height:22px;font-size:13px;color:#b8ac9b}
+    footer{margin-top:80px;color:#817b72;font-size:12px}
+  </style>
+</head>
+<body>
+  <strong class="label">VORSCHAU · rein synthetische Testsignale · keine echte Wiedergabe</strong>
+  <div class="page">
+    <nav>DeepStream Pro</nav>
+    <div class="hero">
+      <div class="eyebrow">Fiktiver Film · Anzeigevorschau</div>
+      <h1>Das Licht am Horizont</h1>
+      <p>Diese Ansicht verwendet keine Medien oder Bilder. Die Schaltflächen senden ausschließlich simulierte Bestätigungen an das echte Anzeigemodul.</p>
+      <div class="controls">
+        <button id="both" type="button">Atmos, dann Vision</button>
+        <button id="atmos" type="button">Nur Atmos</button>
+        <button id="vision" type="button">Nur Vision</button>
+        <button id="stop" type="button">Vorschau stoppen</button>
+      </div>
+      <div id="state" role="status" aria-live="polite">Bereit für eine Vorschau.</div>
+      <footer>Alle Titel, Formate und Statusmeldungen auf dieser Seite dienen nur der Veranschaulichung.</footer>
+    </div>
+  </div>
+  <script src="../../native/formatActivationToast.js"></script>
+  <script>
+    (function () {
+      'use strict';
+      const controller = window.DeepStreamFormatActivationToast.create(window, {language:'de'});
+      const state = document.getElementById('state');
+      let generation = 0, session = null, delayed = null;
+      const audio = {format:'dolby-atmos', active:true, confirmed:true};
+      const video = {format:'dolby-vision', active:true, confirmed:true};
+      function stop() {
+        if (delayed !== null) clearTimeout(delayed);
+        delayed = null;
+        if (session !== null) controller.stop(session);
+        session = null;
+      }
+      function begin(label) {
+        stop();
+        session = 'synthetic-preview-' + (++generation);
+        controller.startSession(session);
+        state.textContent = 'Simulation: ' + label;
+      }
+      document.getElementById('both').addEventListener('click', function () {
+        begin('Atmos bestätigt; Vision folgt.');
+        const current = session;
+        controller.observe(current, {audio});
+        delayed = setTimeout(function () {
+          delayed = null;
+          controller.observe(current, {video});
+          if (session === current) state.textContent = 'Simulation: Atmos und Vision bestätigt.';
+        }, 1200);
+      });
+      document.getElementById('atmos').addEventListener('click', function () {
+        begin('Atmos bestätigt.'); controller.observe(session, {audio});
+      });
+      document.getElementById('vision').addEventListener('click', function () {
+        begin('Vision bestätigt.'); controller.observe(session, {video});
+      });
+      document.getElementById('stop').addEventListener('click', function () {
+        stop(); state.textContent = 'Vorschau gestoppt.';
+      });
+      window.addEventListener('pagehide', function () { stop(); controller.destroy(); });
+    })();
+  </script>
+</body>
+</html>

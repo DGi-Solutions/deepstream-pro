@@ -12,7 +12,24 @@
 #include <functional>
 
 #include "ComponentManager.h"
+#include "AudioEnhancementSession.h"
+#include "MpvLoadEvidence.h"
 #include "QtHelper.h"
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+#include "ExperimentalBackendCoordinator.h"
+#include "DeferredLoadGate.h"
+#include "MpvStopFence.h"
+#include <QNetworkAccessManager>
+#include <QColor>
+#include <QPointer>
+#include <memory>
+class QNetworkReply;
+class NativeAVBackend;
+#if defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+class NativeHlsSession;
+class HlsSessionRelay;
+#endif
+#endif
 
 #include <mpv/client.h>
 
@@ -23,9 +40,18 @@ class AlbumArtProvider;
 class PlayerComponent : public ComponentBase
 {
   Q_OBJECT
+  friend class LocalMediaController;
+  Q_PROPERTY(bool avFixtureVideoActive READ avFixtureVideoActive NOTIFY avFixtureVideoActiveChanged)
   DEFINE_SINGLETON(PlayerComponent);
 
 public:
+  bool avFixtureVideoActive() const {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+    return m_avFixtureWindowColorSaved;
+#else
+    return false;
+#endif
+  }
   const char* componentName() override { return "player"; }
   bool componentExport() override { return true; }
   bool componentInitialize() override;
@@ -36,6 +62,10 @@ public:
 
   // Deprecated. Corresponds to stop() + queueMedia().
   Q_INVOKABLE bool load(const QString& url, const QVariantMap& options, const QVariantMap& metadata, const QVariant& audioStream = QVariant(), const QVariant& subtitleStream = QVariant());
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND) && defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+  Q_INVOKABLE QString bindNativeAudioSession(const QVariantMap& request);
+  Q_INVOKABLE void clearNativeAudioSession();
+#endif
 
   // Append a media item to the internal playlist. If nothing is played yet, the
   // newly appended item will start playing immediately.
@@ -96,6 +126,13 @@ public:
   Q_INVOKABLE virtual QVariant getAudioDeviceList();
   Q_INVOKABLE QVariantMap getAudioCapabilities() const;
   Q_INVOKABLE QVariantMap getAudioSignalPath() const;
+  Q_INVOKABLE QVariantMap getVideoSignalPath() const;
+#ifdef DEEPSTREAM_HLS_CONTROLLED_MPV_TEST
+  Q_INVOKABLE QVariantMap getControlledSwitchDiagnostics() const;
+#endif
+  // Scoped to the currently loaded file; a stale UI response must not alter another title.
+  Q_INVOKABLE QVariantMap setAudioEnhancementForSession(const QString& session, const QVariantMap& settings);
+  Q_INVOKABLE QVariantMap getAudioEnhancementStatusForSession(const QString& session) const;
   // Uses the "name" from the device list.
   Q_INVOKABLE virtual void setAudioDevice(const QString& name);
 
@@ -174,6 +211,8 @@ public Q_SLOTS:
   void updateSubtitleConfiguration();
   void updateVideoConfiguration();
   void updateConfiguration();
+  void stopPlaybackInternal();
+  bool loadAccepted(const QString&, const QVariantMap&, const QVariantMap&, const QVariant&, const QVariant&, quint64);
 
 private Q_SLOTS:
   void handleMpvEvents();
@@ -182,6 +221,15 @@ private Q_SLOTS:
   void updateAudioDevice();
 
 Q_SIGNALS:
+  void playbackOwnerChangeRequested();
+  void playbackQueueChangeRequested();
+  void mpvEntryStarted(qint64 entry);
+  void mpvEntryLoaded(qint64 entry);
+  void mpvEntryFailed(qint64 entry);
+  void avFixtureVideoActiveChanged();
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND) && defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+  void nativeAudioSessionBindingResult(const QString& bindingId,bool success);
+#endif
   // The following signals correspond to the State enum above.
   void playing();                 // playback is progressing (audio playing, pictures are moving)
   void buffering(float percent);  // temporary state during "playing", or during media loading
@@ -226,6 +274,8 @@ Q_SIGNALS:
   void seekPerformed(qint64 positionMs);
   void metadataChanged(const QVariantMap& metadata);
   void volumeChanged(double volume);
+  void nativeAudioStateChanged(const QString& playbackToken, int volume, bool muted);
+  void nativeWindowStopped(const QString& playbackToken);
 
   // Buffered ranges from demuxer-cache-state, as list of {start, end} in ticks
   void bufferedRangesUpdated(const QVariantList& ranges);
@@ -251,7 +301,102 @@ private:
   void updateVideoAspectSettings();
   QVariantList findStreamsForURL(const QString &url);
   void reselectStream(const QVariant &streamSelection, MediaType target);
+  void queueMediaInternal(const QString& url, const QVariantMap& options, const QVariantMap& metadata,
+                          const QVariant& audioStream, const QVariant& subtitleStream);
 
+  QVariantMap setAudioEnhancement(const QVariantMap& settings);
+  QVariantMap getAudioEnhancementStatus() const;
+  QVariantMap sanitizeAudioEnhancement(const QVariantMap& settings, QString* error) const;
+  void applyAudioEnhancement();
+  bool removeAudioEnhancementFilter();
+  bool hasAudioEnhancementFilter() const;
+  QString audioEnhancementRouteBlockReason() const;
+  qint64 currentPlayingEntryId() const;
+  MpvLoadEvidence m_mpvLoadEvidence;
+  void refreshAudioEnhancement();
+  bool removeAudioEnhancementAtBoundary();
+  void invalidateAudioEnhancementRoute();
+  QVariantMap scopedAudioEnhancementStatus(const QString& session, bool accepted) const;
+#ifdef Q_OS_MAC
+  static quint32 defaultAudioOutputDevice();
+#endif
+
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  enum class AVFixturePhase { Idle, Hashing, Draining, Starting, Active };
+  bool startAVFixture(const QString&, const QVariantMap&, const QVariantMap&, const QVariant&, const QVariant&);
+#if defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+  bool startNativeAudioHls(const QString&, const QVariantMap&, const QVariantMap&, const QVariant&, const QVariant&);
+  bool nativeAudioHlsRouteAllowed(bool videoRoute=false) const;
+  std::unique_ptr<NativeHlsSession> m_nativeHlsSession;
+  std::unique_ptr<HlsSessionRelay> m_nativeFallbackRelay;
+  QUrl m_nativeFallbackMetadataOrigin;
+  bool m_nativeAudioHls=false;
+  bool m_nativeVideoHls=false;
+  QString m_nativeAudioHlsCodec;
+  QString m_nativeAudioHlsBindingId;
+  int m_nativeAudioHlsExpectedChannels=0;
+#endif
+  bool cancelAVFixture(bool userStop);
+  bool snapshotNativeAudioState();
+  bool restoreMpvAudioState();
+  void fallbackAVFixture();
+  void beginAVFixtureDrain();
+  void advanceAVFixtureDrain();
+  void checkAVFixtureAudioSelection();
+  void failAVFixture(const QString&);
+  void setAVFixtureState(State);
+  void setAVFixtureVideoVisible(bool);
+  AVFixturePhase m_avFixturePhase = AVFixturePhase::Idle;
+  struct AVFixtureLoadRequest { QString url; QVariantMap options, metadata; QVariant audio, subtitle; std::optional<int> volume, rate; std::optional<bool> muted; };
+  DeferredLoadGate<AVFixtureLoadRequest> m_avFixtureLoads;
+  quint64 m_avFixtureDrainTicket = 0;
+  ExperimentalBackendCoordinator m_avFixtureCoordinator;
+  MpvStopFence m_avFixtureFence;
+  std::unique_ptr<NativeAVBackend> m_avFixtureBackend;
+  QNetworkAccessManager m_avFixtureNetwork;
+  QPointer<QNetworkReply> m_avFixtureReply;
+  QTimer m_avFixtureTimeout;
+  QTimer m_avFixtureAudioPoll;
+  quint64 m_avFixtureEpoch = 0;
+  quint64 m_avFixtureGeneration = 0;
+  bool m_avFixtureStopAccepted = false;
+  bool m_avFixtureMpvLoadPending = false;
+  bool m_avFixtureMpvIsolated = false;
+  bool m_avFixtureSeekPending = false;
+  bool m_avFixtureVideoReady = false;
+  bool m_avFixtureWindowColorSaved = false;
+  bool m_avFixtureVideoVisibilitySaved = false;
+  bool m_avFixturePreviousVideoVisible = false;
+  QColor m_avFixturePreviousWindowColor;
+  bool m_avFixtureCancelRequested = false;
+  bool m_suppressMpvDuringDeferredHash = false;
+  bool m_avFixtureGaplessSaved = false;
+  QVariant m_avFixturePreviousGapless;
+  bool restoreAVFixtureGapless();
+  bool m_avFixtureAutoplay = true;
+  bool m_avFixtureMuted = false;
+  int m_avFixtureVolume = 0;
+  int m_avFixtureRate = 1000;
+  qint64 m_avFixtureSeek = 0;
+  QString m_avFixtureUrl;
+  QVariantMap m_avFixtureOptions, m_avFixtureMetadata;
+  QVariant m_avFixtureAudio, m_avFixtureSubtitle;
+#endif
+
+  AudioEnhancementSession m_audioEnhancementSession;
+  QVariantMap m_audioEnhancement;
+  QVariantMap m_pendingAudioEnhancement;
+  QString m_audioEnhancementReason = QStringLiteral("disabled");
+  QString m_pendingAudioEnhancementReason = QStringLiteral("disabled");
+  bool m_audioEnhancementActive = false;
+  bool m_audioEnhancementLoadPrepared = false;
+  bool m_audioEnhancementPlanFresh = false;
+  bool m_audioEnhancementBoundaryFailed = false;
+  bool m_lastQueueSucceeded = false;
+#ifdef Q_OS_MAC
+  QTimer m_audioOutputMonitorTimer;
+  quint32 m_audioOutputDevice = 0;
+#endif
   MpvController* m_mpv = nullptr;
 
   State m_state;

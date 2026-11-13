@@ -1,0 +1,47 @@
+diff --git a/src/mpvcontroller.cpp b/src/mpvcontroller.cpp
+index 53a9b7b..e68143d 100644
+--- a/src/mpvcontroller.cpp
++++ b/src/mpvcontroller.cpp
+@@ -181,0 +182,8 @@ void MpvController::init()
++#if defined(DEEPSTREAM_EXPERIMENTAL_AV_FIXTURE) || defined(DEEPSTREAM_HLS_CONTROLLED_MPV_TEST)
++    // Test build only: no user config, scripts, or IPC before mpv initializes.
++    const int noConfig = mpv_set_option_string(d_ptr->m_mpv, "config", "no");
++    const int noAutoload = mpv_set_option_string(d_ptr->m_mpv, "load-scripts", "no");
++    const int noScripts = mpv_set_option_string(d_ptr->m_mpv, "scripts", "");
++    const int noIpc = mpv_set_option_string(d_ptr->m_mpv, "input-ipc-server", "");
++    d_ptr->fixtureIsolationConfirmed = noConfig >= 0 && noAutoload >= 0 && noScripts >= 0 && noIpc >= 0;
++#endif
+@@ -190,0 +199 @@ void MpvController::init()
++#if !defined(DEEPSTREAM_EXPERIMENTAL_AV_FIXTURE) && !defined(DEEPSTREAM_HLS_CONTROLLED_MPV_TEST)
+@@ -191,0 +201,3 @@ void MpvController::init()
++#else
++    Q_UNUSED(configPath);
++#endif
+@@ -194,0 +207,7 @@ void MpvController::init()
++#ifdef DEEPSTREAM_HAS_NATIVE_AV_BACKEND
++bool MpvController::fixtureIsolationConfirmed() const
++{
++    return d_ptr && d_ptr->fixtureIsolationConfirmed;
++}
++#endif
++
+@@ -353 +372,2 @@ QVariant MpvController::command(const QVariant &params)
+-        qDebug() << getError(err) << params;
++        // Command arguments may contain media URLs or authorization data.
++        qDebug() << getError(err);
+diff --git a/src/mpvcontroller.h b/src/mpvcontroller.h
+index 97433af..d45acda 100644
+--- a/src/mpvcontroller.h
++++ b/src/mpvcontroller.h
+@@ -75,0 +76,3 @@ public:
++#ifdef DEEPSTREAM_HAS_NATIVE_AV_BACKEND
++    bool fixtureIsolationConfirmed() const;
++#endif
+diff --git a/src/mpvcontroller_p.h b/src/mpvcontroller_p.h
+index 4b4e41f..9bbdb9d 100644
+--- a/src/mpvcontroller_p.h
++++ b/src/mpvcontroller_p.h
+@@ -24,0 +25,3 @@ public:
++#ifdef DEEPSTREAM_HAS_NATIVE_AV_BACKEND
++    bool fixtureIsolationConfirmed{false};
++#endif

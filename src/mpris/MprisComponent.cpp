@@ -62,11 +62,10 @@ bool MprisComponent::componentInitialize()
   QString profileCacheDir = ProfileManager::activeProfile().cacheDir();
   m_serviceName = QString("org.mpris.MediaPlayer2.JellyfinDesktop.profile_%1").arg(QFileInfo(profileCacheDir).fileName());
 
-  qDebug() << "Attempting to register MPRIS service:" << m_serviceName;
+  qDebug() << "Attempting to register MPRIS service";
   if (!QDBusConnection::sessionBus().registerService(m_serviceName))
   {
-    qWarning() << "Failed to register MPRIS service:"
-               << QDBusConnection::sessionBus().lastError().message();
+    qWarning() << "Failed to register MPRIS service";
     return true;
   }
   qDebug() << "MPRIS service registered successfully";
@@ -769,7 +768,7 @@ void MprisComponent::onPlayerDurationChanged(qint64 duration)
 
 void MprisComponent::onPlayerMetaData(const QVariantMap& metadata)
 {
-  qDebug() << "MPRIS: Received metadata from PlayerComponent:" << metadata.value("Name").toString();
+  qDebug() << "MPRIS: Received metadata from PlayerComponent";
   updateMetadata(metadata);
 }
 

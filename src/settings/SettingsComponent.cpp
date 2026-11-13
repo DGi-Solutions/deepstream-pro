@@ -749,7 +749,7 @@ QString SettingsComponent::getWebClientUrl(bool desktop)
     url = "qrc:///web-client/extension/find-webclient.html";
   }
 
-  qDebug() << "Using web-client URL: " << url;
+  qDebug() << "Web-client URL selected";
 
   return url;
 }

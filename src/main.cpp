@@ -232,6 +232,9 @@ int main(int argc, char *argv[])
     }
 
     detectOpenGLEarly();
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+    QQuickWindow::setDefaultAlphaBuffer(true);
+#endif
     QQuickWindow::setGraphicsApi(QSGRendererInterface::OpenGL);
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 
@@ -464,7 +467,7 @@ int main(int argc, char *argv[])
       defaultProfile->setPersistentStoragePath(ProfileManager::activeProfile().dataDir("QtWebEngine"));
     }
 
-#if defined(Q_OS_MAC) && defined(NDEBUG)
+#if defined(Q_OS_MAC) && defined(NDEBUG) && !defined(DEEPSTREAM_EXPERIMENTAL_AV_FIXTURE) && !defined(DEEPSTREAM_HLS_CONTROLLED_MPV_TEST)
     if (!parser.isSet("no-move-to-applications"))
       PFMoveToApplicationsFolderIfNecessary();
 #endif

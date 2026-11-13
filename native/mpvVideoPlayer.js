@@ -10,6 +10,43 @@
         return Math.min(100, Math.max(0, Math.round(val)));
     }
 
+    function nativeControlToken() {
+        try {
+            if (typeof window.crypto?.getRandomValues !== 'function') return null;
+            const bytes = new Uint8Array(16);
+            window.crypto.getRandomValues(bytes);
+            return Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+        } catch (_) { return null; }
+    }
+
+    // Test request only. Native code verifies the fetched master bytes before
+    // it can open AVPlayer; these fields are not source or renderer evidence.
+    function experimentalAvFixtureRequest(options, capabilities) {
+        const request = options.experimentalAv;
+        if (capabilities.experimentalAvFixtureAvailable !== true || !request ||
+            request.enabled !== true || request.fixture !== 'public-apple-joc-v1' ||
+            request.sourceSha256 !== '70a29e4e5a56e79127db3820b98ce74a79e52e780beb57ff99eb5f90b428cc9e' ||
+            typeof request.sourceUrl !== 'string' || /[?#]/.test(request.sourceUrl) ||
+            request.sourceUrl !== options.url || request.audioSelection !== 'single-joc' ||
+            request.subtitles !== 'off' || request.transport !== 'public-loopback-fixture' ||
+            options.playMethod !== 'DirectPlay' || options.mediaSource?.DefaultAudioStreamIndex === -1 ||
+            (options.mediaSource?.DefaultSubtitleStreamIndex ?? -1) !== -1) return null;
+        const audio = options.mediaSource?.MediaStreams?.filter(stream => stream.Type === 'Audio') || [];
+        if (audio.length !== 1 || audio[0].IsExternal || audio[0].Codec !== 'eac3' ||
+            options.mediaSource.DefaultAudioStreamIndex !== audio[0].Index) return null;
+        try {
+            const url = new URL(request.sourceUrl);
+            if (url.protocol !== 'http:' || url.hostname !== '127.0.0.1' ||
+                !url.port || Number(url.port) < 1024 || url.pathname !== '/single-joc-master.m3u8' ||
+                url.username || url.password || url.search || url.hash || url.href !== request.sourceUrl) return null;
+        } catch (_) { return null; }
+        return {
+            enabled: true, fixture: 'public-apple-joc-v1', sourceUrl: request.sourceUrl,
+            sourceSha256: request.sourceSha256, audioSelection: 'single-joc',
+            subtitles: 'off', transport: 'public-loopback-fixture'
+        };
+    }
+
     class mpvVideoPlayer {
         constructor({ events, loading, appRouter, globalize, appHost, appSettings, confirm, dashboard }) {
             this.events = events;
@@ -24,7 +61,7 @@
             /**
              * @type {string}
              */
-            this.name = 'MPV Video Player';
+            this.name = 'DeepStream Player';
             /**
              * @type {string}
              */
@@ -153,6 +190,7 @@
              * @private
              */
             this.onPlaying = () => {
+                this._audioEnhancementController?.refreshStatus(this._audioEnhancementSession);
                 if (!this._started) {
                     this._started = true;
 
@@ -187,6 +225,7 @@
                     this.events.trigger(this, 'unpause');
                 }
 
+                this.startFormatActivationMonitor();
                 this.events.trigger(this, 'playing');
             };
 
@@ -208,6 +247,7 @@
              * @param e {Event} The event received from the `<video>` element
              */
             this.onError = async (error) => {
+                this.invalidateAudioEnhancement();
                 this.removeMediaDialog();
                 console.error(`media error: ${error}`);
 
@@ -323,11 +363,69 @@
         }
 
         async setCurrentSrc(elem, options) {
+            this._dvEvidenceRevision = (this._dvEvidenceRevision || 0) + 1;
+            this._dvSourceEvidence = null;
+            this.stopFormatActivationMonitor();
+            this._nativeControlToken = null;
+            this._nativeOriginalAudioIndex = null;
             const generation = (this._audioSelectionGeneration || 0) + 1;
             this._audioSelectionGeneration = generation;
+            const enhancements = window.DeepStreamAudioEnhancements?.create(window);
+            this._audioEnhancementController = enhancements;
+            const enhancementIdentity = enhancements?.identityForPlayback(options);
             const capabilities = await this.readAudioPlayerInfo('getAudioCapabilities');
             if (this._audioSelectionGeneration !== generation) return;
+            if (enhancementIdentity && !enhancements.identityCurrent(enhancementIdentity)) return;
             this._audioCapabilities = capabilities;
+            const fixtureRequest = experimentalAvFixtureRequest(options, capabilities);
+            const negotiated = options.mediaSource?.DeepStreamNativeAudioRequest;
+            const selectedV2Track = () => {
+                const index = options.mediaSource?.DefaultAudioStreamIndex;
+                const tracks = (options.mediaSource?.MediaStreams || [])
+                    .filter(stream => stream.Type === 'Audio' && stream.Index === index);
+                return tracks.length === 1 ? tracks[0] : null;
+            };
+            const v2Permitted = () => {
+                const route = capabilities.nativeDolbyVisionAudioHlsV2, track = selectedV2Track();
+                if (!track) return false;
+                const codec = String(track.Codec).toLowerCase();
+                return capabilities.nativeDolbyVisionHlsAvailable === true && route !== null && typeof route === 'object' &&
+                    !Array.isArray(route) && route.available === true && Array.isArray(route.codecs) && route.codecs.includes(codec);
+            };
+            const rejectNative = () => {
+                this._nativeAudioController?.clear();
+                this._nativeAudioController = null;
+                // Decline the existing web client's automatic lossy retry for this failed native request.
+                // The original source metadata object remains unchanged for a later explicit start.
+                options.mediaSource = {...options.mediaSource, SupportsTranscoding: false};
+                throw new Error('Requested audio output is unavailable');
+            };
+            if (negotiated && (!['deepstream-audio-hls-v1','deepstream-video-hls-v1','deepstream-video-hls-v2'].includes(negotiated.contract) ||
+                negotiated.itemId !== options.item?.Id || negotiated.sourceId !== options.mediaSource.Id ||
+                negotiated.audioIndex !== options.mediaSource.DefaultAudioStreamIndex ||
+                negotiated.playSessionId !== options.playSessionId)) rejectNative();
+            const nativeAudio = !fixtureRequest && (capabilities.nativeAudioHlsAvailable === true ||
+                (negotiated?.contract === 'deepstream-video-hls-v1' && capabilities.nativeDolbyVisionHlsAvailable === true) ||
+                (negotiated?.contract === 'deepstream-video-hls-v2' && v2Permitted()))
+                ? window.DeepStreamNativeAudio?.create(window) : null;
+            if (this._nativeAudioController && this._nativeAudioController !== nativeAudio) this._nativeAudioController.clear();
+            this._nativeAudioController = nativeAudio;
+            let nativeAudioRequest = null;
+            try { nativeAudioRequest = nativeAudio ? await nativeAudio.requestForPlayback(options, capabilities) : null; }
+            catch (_) { /* Retain the original mpv path if the session bridge is unavailable. */ }
+            if (this._audioSelectionGeneration !== generation) return;
+            if (enhancementIdentity && !enhancements.identityCurrent(enhancementIdentity)) return;
+            if (negotiated && !nativeAudioRequest) rejectNative();
+            if (negotiated && nativeAudioRequest.contract !== negotiated.contract) rejectNative();
+            if (!nativeAudioRequest && nativeAudio) {
+                nativeAudio.clear();
+                this._nativeAudioController = null;
+            }
+            if (nativeAudioRequest && (!Number.isInteger(nativeAudioRequest.selection?.audioStreamIndex) ||
+                nativeAudioRequest.selection.audioStreamIndex !== options.mediaSource?.DefaultAudioStreamIndex)) rejectNative();
+            if (nativeAudioRequest?.contract === 'deepstream-video-hls-v2' && (!v2Permitted() ||
+                nativeAudioRequest.selection?.codec !== String(selectedV2Track()?.Codec).toLowerCase() ||
+                nativeAudioRequest.selection?.channels !== selectedV2Track()?.Channels)) rejectNative();
             const engine = window.DeepStreamAudio;
             this._audioPlan = engine ? engine.plan({
                 streams: options.mediaSource?.MediaStreams,
@@ -336,10 +434,17 @@
                 playMethod: options.playMethod,
                 capabilities
             }) : null;
-            return new Promise((resolve) => {
+            if (nativeAudioRequest && this._audioPlan &&
+                this._audioPlan.selectedIndex !== nativeAudioRequest.selection.audioStreamIndex) rejectNative();
+            let controlToken = null;
+            if (nativeAudioRequest || fixtureRequest) {
+                controlToken = nativeControlToken();
+                if (!controlToken || !this.connectNativeControlSignals(window.api?.player)) rejectNative();
+            }
+            return new Promise((resolve, reject) => {
                 const val = options.url;
                 this._currentSrc = val;
-                console.debug(`playing url: ${val}`);
+                console.debug("[MPV] Playback requested");
 
                 // Convert to seconds
                 const ms = (options.playerStartPositionTicks || 0) / 10000;
@@ -348,6 +453,9 @@
                 this._audioTrackIndexToSetOnPlaying = this._audioPlan
                     ? this._audioPlan.selectedIndex : options.mediaSource.DefaultAudioStreamIndex;
                 options.mediaSource.DefaultAudioStreamIndex = this._audioTrackIndexToSetOnPlaying;
+                this._dvSourceEvidence = nativeAudioRequest
+                    ? window.DeepStreamDolbyVisionSession?.inspectBoundSource(options, nativeAudioRequest) || null
+                    : null;
 
                 console.log('[MPV] Audio track index:', this._audioTrackIndexToSetOnPlaying);
                 console.log('[MPV] Subtitle track index:', this._subtitleTrackIndexToSetOnPlaying);
@@ -375,7 +483,7 @@
                     const subStream = this.getStreamByIndex(streams, this._subtitleTrackIndexToSetOnPlaying);
                     if (subStream && subStream.DeliveryMethod === 'External' && subStream.DeliveryUrl) {
                         subtitleParam = '#,' + subStream.DeliveryUrl;
-                        console.log('[MPV] External subtitle URL:', subStream.DeliveryUrl);
+                        console.log('[MPV] External subtitle selected');
                     } else {
                         const relIndex = this.getRelativeIndexByType(streams, this._subtitleTrackIndexToSetOnPlaying, 'Subtitle');
                         subtitleParam = relIndex != null ? relIndex : -1;
@@ -387,16 +495,107 @@
 
                 console.log('[MPV] Mapped audio index:', this._audioTrackIndexToSetOnPlaying, '->', audioRelIndex);
 
+                const loadOptions = {startMilliseconds: ms, autoplay: true};
+                if (controlToken) {
+                    this._nativeControlToken = controlToken;
+                    this._nativeOriginalAudioIndex = nativeAudioRequest?.selection.audioStreamIndex ?? null;
+                    loadOptions.nativeControlToken = controlToken;
+                }
+                if (fixtureRequest) {
+                    loadOptions.experimentalAv = fixtureRequest;
+                    streamdata.headers = {};
+                }
+                if (nativeAudioRequest) {
+                    loadOptions.nativeAudioHls = nativeAudioRequest;
+                    streamdata.headers = {};
+                }
+                if (enhancements) {
+                    const ticket = enhancements.preparePlayback(options, this._audioPlan);
+                    loadOptions.audioEnhancement = ticket.nativeConfig;
+                    loadOptions.audioEnhancementSession = ticket.session;
+                    this._audioEnhancementSession = enhancements.bindPlayback(ticket, () =>
+                        this._audioSelectionGeneration === generation && this._currentPlayOptions === options && this._currentSrc === val);
+                }
+                const session = this._audioEnhancementSession;
                 player.load(val,
-                    { startMilliseconds: ms, autoplay: true },
+                    loadOptions,
                     streamdata,
                     audioRelIndex,
                     subtitleParam,
-                    resolve);
+                    result => {
+                        if (this._audioSelectionGeneration === generation && this._audioEnhancementSession === session) {
+                            if (result === false) {
+                                if (this._nativeControlToken === controlToken) {
+                                    this._nativeControlToken = null;
+                                    this._nativeOriginalAudioIndex = null;
+                                }
+                                this.invalidateAudioEnhancement();
+                                const controller = this._nativeAudioController;
+                                this._nativeAudioController = null;
+                                controller?.clear();
+                                reject(new Error('Playback request rejected'));
+                                return;
+                            }
+                            enhancements?.refreshStatus(session);
+                        }
+                        resolve(result);
+                    });
             });
         }
 
+        startFormatActivationMonitor() {
+            const helper = window.DeepStreamFormatActivationToast;
+            if (!helper || !window.document?.body || !this._currentPlayOptions ||
+                this._formatActivationMonitor?.generation === this._audioSelectionGeneration) return;
+            this.stopFormatActivationMonitor();
+            if (!this._formatActivationToast) {
+                this._formatActivationToast = helper.create(window, {language: window.DeepStreamLocale?.language(window)});
+            }
+            const monitor = {id: 'play-' + (this._formatActivationSequence = (this._formatActivationSequence || 0) + 1),
+                generation: this._audioSelectionGeneration, options: this._currentPlayOptions, source: this._currentSrc,
+                busy: false, interval: null, expiry: null};
+            this._formatActivationMonitor = monitor;
+            this._formatActivationToast.startSession(monitor.id);
+            const live = () => this._formatActivationMonitor === monitor && this._audioSelectionGeneration === monitor.generation &&
+                this._currentPlayOptions === monitor.options && this._currentSrc === monitor.source;
+            const poll = async () => {
+                if (!live() || monitor.busy) return;
+                monitor.busy = true;
+                try {
+                    const [audio, video] = await Promise.all([
+                        this.readAudioPlayerInfo('getAudioSignalPath'), this.readAudioPlayerInfo('getVideoSignalPath')
+                    ]);
+                    if (!live()) return;
+                    // activation is an explicit native runtime result. Source/codec labels never create it.
+                    this._formatActivationToast.observe(monitor.id, {audio: audio.activation, video: video.activation});
+                } finally { monitor.busy = false; }
+            };
+            monitor.interval = window.setInterval(poll, 1000);
+            monitor.expiry = window.setTimeout(() => {
+                if (!live()) return;
+                window.clearInterval(monitor.interval);
+                monitor.interval = null;
+            }, 15000);
+            poll();
+        }
+
+        stopFormatActivationMonitor() {
+            const monitor = this._formatActivationMonitor;
+            this._formatActivationMonitor = null;
+            if (!monitor) return;
+            if (monitor.interval !== null) window.clearInterval(monitor.interval);
+            if (monitor.expiry !== null) window.clearTimeout(monitor.expiry);
+            this._formatActivationToast?.stop(monitor.id);
+        }
+
+        invalidateAudioEnhancement() {
+            this._audioEnhancementController?.invalidatePlayback(this._audioEnhancementSession);
+            this._audioEnhancementSession = null;
+        }
+
         setSubtitleStreamIndex(index) {
+            this._dvEvidenceRevision = (this._dvEvidenceRevision || 0) + 1;
+            this._dvSourceEvidence = null;
             console.log('[MPV] setSubtitleStreamIndex called with index:', index);
             this._subtitleTrackIndexToSetOnPlaying = index;
 
@@ -410,7 +609,7 @@
 
             // Handle external subtitle URL
             if (stream && stream.DeliveryMethod === 'External' && stream.DeliveryUrl) {
-                console.log('[MPV] Loading external subtitle:', stream.DeliveryUrl);
+                console.log('[MPV] Loading external subtitle');
                 window.api.player.setSubtitleStream('#,' + stream.DeliveryUrl);
                 return;
             }
@@ -473,7 +672,16 @@
         }
 
         setAudioStreamIndex(index) {
+            this._dvEvidenceRevision = (this._dvEvidenceRevision || 0) + 1;
+            this._dvSourceEvidence = null;
             console.log('[MPV] setAudioStreamIndex called with index:', index);
+            if (this._nativeControlToken && this._nativeOriginalAudioIndex !== null &&
+                index !== this._nativeOriginalAudioIndex) {
+                this.events.trigger(this, 'error', [{type: 'mediadecodeerror',
+                    message: 'Audio track change requires a new playback request',
+                    streamInfo: {mediaSource: {SupportsTranscoding: false}}}]);
+                return;
+            }
             this._audioTrackIndexToSetOnPlaying = index;
             const engine = window.DeepStreamAudio;
             if (engine) this._audioPlan = engine.plan({
@@ -487,22 +695,36 @@
             const relIndex = index < 0 ? -1 : (serverOutput ? 1 : this.getRelativeIndexByType(streams, index, 'Audio'));
             console.log('[MPV] Mapped audio index:', index, '->', relIndex);
             window.api.player.setAudioStream(relIndex != null ? relIndex : -1);
+            this._audioEnhancementController?.updatePlan(this._audioEnhancementSession, this._audioPlan);
         }
 
         onEndedInternal() {
-            const stopInfo = {
-                src: this._currentSrc
-            };
-
-            this.events.trigger(this, 'stopped', [stopInfo]);
-
+            this._dvEvidenceRevision = (this._dvEvidenceRevision || 0) + 1;
+            this._dvSourceEvidence = null;
+            this._nativeControlToken = null;
+            this._nativeOriginalAudioIndex = null;
+            this.stopFormatActivationMonitor();
+            const source = this._currentSrc;
             this._currentTime = null;
             this._currentSrc = null;
             this._currentPlayOptions = null;
+            const nativeAudio = this._nativeAudioController;
+            this._nativeAudioController = null;
+            nativeAudio?.clear();
+            this.invalidateAudioEnhancement();
+            if (source != null) this.events.trigger(this, 'stopped', [{src: source}]);
         }
 
         stop(destroyPlayer) {
+            this._dvEvidenceRevision = (this._dvEvidenceRevision || 0) + 1;
+            this._dvSourceEvidence = null;
+            this._nativeControlToken = null;
+            this._nativeOriginalAudioIndex = null;
             this._audioSelectionGeneration = (this._audioSelectionGeneration || 0) + 1;
+            this._nativeAudioNegotiation?.clear();
+            this._nativeAudioController?.clear();
+            this._nativeAudioController = null;
+            this.invalidateAudioEnhancement();
             window.api.player.stop();
 
             this.onEndedInternal();
@@ -514,6 +736,15 @@
         }
 
         removeMediaDialog() {
+            this._dvEvidenceRevision = (this._dvEvidenceRevision || 0) + 1;
+            this._dvSourceEvidence = null;
+            this._nativeControlToken = null;
+            this._nativeOriginalAudioIndex = null;
+            this.stopFormatActivationMonitor();
+            this._audioSelectionGeneration = (this._audioSelectionGeneration || 0) + 1;
+            this._nativeAudioController?.clear();
+            this._nativeAudioController = null;
+            this.invalidateAudioEnhancement();
             window.api.player.stop();
 
             window.api.player.setVideoRectangle(-1, 0, 0, 0);
@@ -534,9 +765,20 @@
         }
 
         destroy() {
+            this.stopFormatActivationMonitor();
+            this._formatActivationToast?.destroy();
+            this._formatActivationToast = null;
+            this._nativeAudioNegotiation?.dispose();
+            this._nativeAudioNegotiation = null;
             this.removeMediaDialog();
 
             const player = window.api.player;
+            if (this._nativeControlSignalsConnected) {
+                try { this._nativeControlSignalPlayer.nativeWindowStopped.disconnect(this._onNativeWindowStopped); } catch (_) {}
+                try { this._nativeControlSignalPlayer.nativeAudioStateChanged.disconnect(this._onNativeAudioStateChanged); } catch (_) {}
+                this._nativeControlSignalsConnected = false;
+                this._nativeControlSignalPlayer = null;
+            }
             this._hasConnection = false;
             this._bufferedRanges = [];
             player.playing.disconnect(this.onPlaying);
@@ -547,6 +789,43 @@
             player.error.disconnect(this.onError);
             player.paused.disconnect(this.onPause);
             player.bufferedRangesUpdated.disconnect(this.onBufferedRangesUpdated);
+        }
+
+        connectNativeControlSignals(player) {
+            if (this._nativeControlSignalsConnected && this._nativeControlSignalPlayer === player) return true;
+            if (this._nativeControlSignalsConnected) {
+                try { this._nativeControlSignalPlayer.nativeWindowStopped.disconnect(this._onNativeWindowStopped); } catch (_) {}
+                try { this._nativeControlSignalPlayer.nativeAudioStateChanged.disconnect(this._onNativeAudioStateChanged); } catch (_) {}
+                this._nativeControlSignalsConnected = false;
+                this._nativeControlSignalPlayer = null;
+            }
+            const stopped = player?.nativeWindowStopped, audio = player?.nativeAudioStateChanged;
+            if (typeof stopped?.connect !== 'function' || typeof stopped?.disconnect !== 'function' ||
+                typeof audio?.connect !== 'function' || typeof audio?.disconnect !== 'function') return false;
+            this._onNativeWindowStopped ||= token => {
+                if (typeof token !== 'string' || !token || token !== this._nativeControlToken) return;
+                this._nativeControlToken = null;
+                this._nativeOriginalAudioIndex = null;
+                this._audioSelectionGeneration = (this._audioSelectionGeneration || 0) + 1;
+                this._nativeAudioNegotiation?.clear();
+                this.onEndedInternal();
+            };
+            this._onNativeAudioStateChanged ||= (token, volume, muted) => {
+                if (typeof token !== 'string' || !token || token !== this._nativeControlToken ||
+                    !Number.isInteger(volume) || volume < 0 || volume > 100 || typeof muted !== 'boolean') return;
+                if (this._volume === volume && this._muted === muted) return;
+                this._volume = volume;
+                this._muted = muted;
+                this.events.trigger(this, 'volumechange');
+            };
+            try {
+                stopped.connect(this._onNativeWindowStopped);
+                try { audio.connect(this._onNativeAudioStateChanged); }
+                catch (error) { try { stopped.disconnect(this._onNativeWindowStopped); } catch (_) {} throw error; }
+                this._nativeControlSignalsConnected = true;
+                this._nativeControlSignalPlayer = player;
+                return true;
+            } catch (_) { return false; }
         }
 
         /**
@@ -606,7 +885,7 @@
                     player.videoPlaybackActive.connect((active) => console.log(`[MPV Signal] videoPlaybackActive: ${active}`));
                     player.windowVisible.connect((visible) => console.log(`[MPV Signal] windowVisible: ${visible}`));
                     player.onVideoRecangleChanged.connect(() => console.log('[MPV Signal] onVideoRecangleChanged'));
-                    player.onMetaData.connect((meta) => console.log(`[MPV Signal] onMetaData: ${JSON.stringify(meta)}`));
+                    player.onMetaData.connect(() => console.log('[MPV Signal] onMetaData'));
                 }
 
                 if (options.fullscreen) {
@@ -646,12 +925,21 @@
     /**
      * @private
      */
-    getDeviceProfile(item, options) {
-        if (this.appHost.getDeviceProfile) {
-            return this.appHost.getDeviceProfile(item, options);
+    async getDeviceProfile(item, options) {
+        const helper = window.DeepStreamNativeAudioNegotiation;
+        if (!this._nativeAudioNegotiation && helper) {
+            this._nativeAudioNegotiation = helper.create(window, method => this.readAudioPlayerInfo(method));
         }
-
-        return Promise.resolve({});
+        const profilePromise = Promise.resolve(this.appHost?.getDeviceProfile ? this.appHost.getDeviceProfile(item, options) : {});
+        let registration = null;
+        try {
+            const candidate = this._nativeAudioNegotiation?.registerItem(item, options, profilePromise);
+            if (candidate != null) registration = Promise.resolve(candidate).catch(() => null);
+        } catch (_) {
+            // Keep the original profile when experimental negotiation fails.
+        }
+        const profile = await profilePromise;
+        return (await registration) || profile;
     }
 
     /**
@@ -869,7 +1157,12 @@
     }
 
     getStats() {
+        const dvEvidenceRevision = this._dvEvidenceRevision;
         const playOptions = this._currentPlayOptions || [];
+        const generation = this._audioSelectionGeneration;
+        const source = this._currentSrc;
+        const audioPlan = this._audioPlan;
+        const dvSourceEvidence = this._dvSourceEvidence;
         const categories = [];
 
         if (!this._currentPlayOptions) {
@@ -911,6 +1204,9 @@
             type: 'video'
         };
         categories.push(videoCategory);
+        if (dvSourceEvidence?.mode) {
+            videoCategory.stats.push({label:'Dolby-Vision-Quelldeklaration', value:dvSourceEvidence.mode});
+        }
 
         const audioCategory = {
             stats: [],
@@ -918,20 +1214,85 @@
         };
         categories.push(audioCategory);
 
-        if (this._audioPlan?.source) {
-            audioCategory.stats.push({label: 'Gewählte Tonspur', value: this._audioPlan.source.label});
-            const selectionNames = {manual: 'Manuell', server_selected: 'Vom Server', capabilities_unknown: 'Unverändert (Decoder noch nicht bekannt)', no_supported_alternative: 'Unverändert (keine passende Alternative)'};
-            audioCategory.stats.push({label: 'Tonspurauswahl', value: selectionNames[this._audioPlan.reason] || 'Automatisch'});
-        }
         return this.readAudioPlayerInfo('getAudioSignalPath').then(path => {
-            if (path.decoder) audioCategory.stats.push({label: 'Decoder', value: path.decoder});
+            if (this._currentPlayOptions !== playOptions || this._audioSelectionGeneration !== generation || this._currentSrc !== source || this._audioPlan !== audioPlan || this._dvSourceEvidence !== dvSourceEvidence || this._dvEvidenceRevision !== dvEvidenceRevision) {
+                return {categories: []};
+            }
+            const apple = path.backend === 'avplayer';
+            const mpv = path.backend === 'mpv' || (!path.backend && (path.engine === 'libmpv' || (!path.engine && Boolean(path.outputDriver))));
+            if (apple || mpv) mediaCategory.stats.push({label: 'Wiedergabe-Engine', value: apple ? 'Apple AVPlayer' : 'libmpv'});
+            if (mpv && audioPlan?.source) {
+                audioCategory.stats.push({label: 'Gewählte Tonspur', value: audioPlan.source.label});
+                const selectionNames = {manual: 'Manuell', server_selected: 'Vom Server', capabilities_unknown: 'Unverändert (Decoder noch nicht bekannt)', no_supported_alternative: 'Unverändert (keine passende Alternative)'};
+                audioCategory.stats.push({label: 'Tonspurauswahl', value: selectionNames[audioPlan.reason] || 'Automatisch'});
+            }
+            // AVPlayer does not expose the mpv PCM or decoder properties. A
+            // source-selection check is separate from object-renderer evidence.
+            if (apple) {
+                const evidence = path.sourceEvidence || {};
+                const sourceLabels = {
+                    'manifest-single-joc-selected': 'E-AC-3 / JOC · Playlist und Auswahl bestätigt',
+                    'fixture_joc_declared': 'E-AC-3 / JOC · Testquelle'
+                };
+                audioCategory.stats.push({label: 'Audioquelle im Stream', value: sourceLabels[evidence.status] || 'Noch nicht geprüft'});
+                const available = evidence.availableAudioOptions, selected = evidence.selectedAudioOptions;
+                if (Number.isInteger(available) && available > 0 && Number.isInteger(selected) && selected >= 0 && selected <= available) {
+                    audioCategory.stats.push({label: 'Ausgewählte Tonspuren', value: `${selected} / ${available}`});
+                }
+            }
+            if (mpv && path.decoder) audioCategory.stats.push({label: 'Decoder', value: path.decoder});
             if (path.outputDriver) audioCategory.stats.push({label: 'Audioausgang', value: path.outputDriver});
-            if (path.decoded?.['channel-count']) audioCategory.stats.push({label: 'Decodierte Kanäle', value: String(path.decoded['channel-count'])});
-            if (path.output?.['channel-count']) audioCategory.stats.push({label: 'Ausgabekanäle', value: String(path.output['channel-count'])});
-            if (path.output?.format) audioCategory.stats.push({label: 'Ausgabeformat', value: path.output.format});
-            if (path.output?.samplerate) audioCategory.stats.push({label: 'Abtastrate der Ausgabe', value: String(path.output.samplerate) + ' Hz'});
-            if (path.outputDriver) audioCategory.stats.push({label: 'Objektwiedergabe', value: path.objectRenderingConfirmed ? 'Bestätigt' : 'Nicht bestätigt'});
-            return {categories};
+            if (mpv && path.decoded?.['channel-count']) audioCategory.stats.push({label: 'Decodierte Kanäle', value: String(path.decoded['channel-count'])});
+            if (mpv && path.output?.['channel-count']) audioCategory.stats.push({label: 'Ausgabekanäle', value: String(path.output['channel-count'])});
+            if (mpv && path.output?.format) audioCategory.stats.push({label: 'Ausgabeformat', value: path.output.format});
+            if (mpv && path.output?.samplerate) audioCategory.stats.push({label: 'Abtastrate der Ausgabe', value: String(path.output.samplerate) + ' Hz'});
+            if (path.outputDriver) audioCategory.stats.push({label: 'Objektwiedergabe', value: path.objectRenderingConfirmed === true ? 'Bestätigt' : 'Nicht bestätigt'});
+            if (window.DeepStreamLocale) {
+                const language = window.DeepStreamLocale.language(window);
+                for (const stat of audioCategory.stats) {
+                    stat.label = window.DeepStreamLocale.text(stat.label, language);
+                    stat.value = window.DeepStreamLocale.text(stat.value, language);
+                }
+            }
+            return this.readAudioPlayerInfo('getVideoSignalPath').then(video => {
+                if (this._currentPlayOptions !== playOptions || this._audioSelectionGeneration !== generation ||
+                    this._currentSrc !== source || this._audioPlan !== audioPlan || this._dvSourceEvidence !== dvSourceEvidence || this._dvEvidenceRevision !== dvEvidenceRevision) return {categories: []};
+                if (video.backend === 'avplayer') {
+                    const description = video.status === 'dv-track-record'
+                        ? 'Dolby-Vision-Konfiguration in gewählter Videospur erkannt'
+                        : video.status === 'unsupported-dv-track-record'
+                            ? 'Dolby-Vision-Profil dieser Videospur nicht unterstützt'
+                            : 'Gewähltes Dolby-Vision-Format nicht bestätigt';
+                    videoCategory.stats.push({label:'Videospur', value:description});
+                    const offered = video.hlsOffered;
+                    const counts = [offered?.dv5Count, offered?.dv81Count, offered?.dv84Count];
+                    if (dvSourceEvidence && offered?.status === 'offered-manifest-only' &&
+                        offered.selected === 'unknown' && offered.outputConfirmed === false &&
+                        Number.isInteger(offered.variantCount) && offered.variantCount > 0 && offered.variantCount <= 1024 &&
+                        counts.every(value => Number.isInteger(value) && value >= 0 && value <= offered.variantCount) &&
+                        counts.reduce((sum, value) => sum + value, 0) <= offered.variantCount) {
+                        const modes = ['5', '8.1', '8.4'].filter((_, index) => counts[index] > 0);
+                        videoCategory.stats.push({label:'Dolby-Vision-Angebot im Stream',
+                            value:modes.length ? modes.join(', ') : 'Nicht erkannt'});
+                        const observed = video.hlsLastObserved;
+                        if (observed?.status === 'last-access-log-declaration' &&
+                            observed.outputConfirmed === false && modes.includes(observed.mode) &&
+                            observed.mode === dvSourceEvidence.mode) {
+                            videoCategory.stats.push({label:'Zuletzt beobachtete HLS-Variante',
+                                value:`Dolby Vision ${observed.mode}`});
+                        }
+                    }
+                    videoCategory.stats.push({label:'Dolby-Vision-Ausgabe', value:'Nicht bestätigt'});
+                }
+                if (window.DeepStreamLocale) {
+                    const language = window.DeepStreamLocale.language(window);
+                    for (const stat of videoCategory.stats) {
+                        stat.label = window.DeepStreamLocale.text(stat.label, language);
+                        stat.value = window.DeepStreamLocale.text(stat.value, language);
+                    }
+                }
+                return {categories};
+            });
         });
     }
 

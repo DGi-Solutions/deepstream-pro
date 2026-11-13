@@ -13,6 +13,8 @@ class MpvVideoItem : public MpvAbstractItem
 public:
     explicit MpvVideoItem(QQuickItem *parent = nullptr);
     void setPlayerComponent(PlayerComponent* player);
+    QQuickFramebufferObject::Renderer *createRenderer() const override;
+    mpv_render_context *renderContext() const;
 
     MpvController* controller() { return mpvController(); }
 

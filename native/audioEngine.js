@@ -114,5 +114,158 @@
             source: info, nativeObjectRoute});
     }
 
-    return Object.freeze({describe, plan, codec, language});
+
+    // Enhancement settings are deliberately kept separate from stream selection. The
+    // native side builds the filter graph; no graph or mpv command is accepted here.
+    const enhancementDefaults = Object.freeze({
+        enabled: false, profile: 'speakers', bass: 0, treble: 0,
+        clarity: 0, night: 0, boost: 0
+    });
+    const enhancementLimits = Object.freeze({
+        bass: [-4, 4], treble: [-4, 4], clarity: [0, 100], night: [0, 100], boost: [0, 3]
+    });
+    function validateEnhancement(value) {
+        const input = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+        const result = {...enhancementDefaults}, errors = [];
+        if (Object.hasOwn(input, 'enabled')) {
+            if (typeof input.enabled === 'boolean') result.enabled = input.enabled;
+            else errors.push('enabled');
+        }
+        if (Object.hasOwn(input, 'profile')) {
+            if (input.profile === 'speakers' || input.profile === 'headphones') result.profile = input.profile;
+            else errors.push('profile');
+        }
+        for (const [key, [minimum, maximum]] of Object.entries(enhancementLimits)) {
+            if (!Object.hasOwn(input, key)) continue;
+            const number = input[key];
+            if (typeof number === 'number' && Number.isFinite(number) && number >= minimum && number <= maximum) result[key] = number;
+            else errors.push(key);
+        }
+        return Object.freeze({ok: errors.length === 0, value: Object.freeze(result), errors: Object.freeze(errors)});
+    }
+
+    // A damaged or manually edited stored value must never turn processing on.
+    function safeEnhancement(value) {
+        const checked = validateEnhancement(value);
+        return checked.ok ? checked.value : Object.freeze({...enhancementDefaults});
+    }
+
+    function playbackEnhancement(value, audioPlan) {
+        const config = safeEnhancement(value);
+        return {
+            enabled: config.enabled, profile: config.profile,
+            bass: config.bass, treble: config.treble, clarity: config.clarity,
+            night: config.night, boost: config.boost,
+            // A selection-route hint is not proof of a native PCM filter path.
+            objectSource: Boolean(audioPlan?.nativeObjectRoute || audioPlan?.source?.objectFormat)
+        };
+    }
+
+    const enhancementStores = new WeakMap();
+    function enhancementStore(win) {
+        if (!win || (typeof win !== 'object' && typeof win !== 'function')) throw new TypeError('window required');
+        let store = enhancementStores.get(win);
+        if (store) return store;
+        // The master switch is deliberately session-only. Persisted controls
+        // cannot reactivate processing after a failed write or app restart.
+        const memory = new Map();
+        let prepared = null;
+        const identity = value => {
+            const result = text(value);
+            return result && result.length <= 200 ? result : '';
+        };
+        const ids = (userId, itemId, context = {}) => {
+            userId = identity(userId); itemId = identity(itemId);
+            const sourceId = identity(context.sourceId), server = identity(context.server);
+            if (!userId || !itemId || !sourceId || !server) return null;
+            try {
+                const url = new URL(server);
+                if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) return null;
+                const normalized = url.origin + url.pathname.replace(/\/+$/, '');
+                if (server !== normalized) return null;
+                const key = 'deepstream.audio-enhancement.v2:' + [server, userId, itemId, sourceId].map(encodeURIComponent).join(':');
+                return {userId, itemId, sourceId, server, key};
+            } catch (_) {return null;}
+        };
+        function currentUser(api) {
+            try {return api && typeof api.getCurrentUserId === 'function' ? identity(api.getCurrentUserId()) : '';}
+            catch (_) {return '';}
+        }
+        function currentServer(api) {
+            try {
+                const address = typeof api?.serverAddress === 'function' ? api.serverAddress() : api?.serverAddress;
+                const url = new URL(address);
+                if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) return '';
+                return url.origin + url.pathname.replace(/\/+$/, '');
+            } catch (_) {return '';}
+        }
+        function storage() {
+            try {return win.localStorage || null;} catch (_) {return null;}
+        }
+        function read(userId, itemId, context) {
+            const id = ids(userId, itemId, context);
+            if (!id) return safeEnhancement(null);
+            if (memory.has(id.key)) return memory.get(id.key);
+            let raw = null;
+            const target = storage();
+            if (target) {
+                try {raw = target.getItem(id.key);} catch (_) { /* Without a dirty entry, read failures stay neutral. */ }
+            }
+            if (typeof raw !== 'string' || raw.length > 4096) return safeEnhancement(null);
+            try {return Object.freeze({...safeEnhancement(JSON.parse(raw)), enabled: false});}
+            catch (_) {return safeEnhancement(null);}
+        }
+        function write(userId, itemId, value, context) {
+            const id = ids(userId, itemId, context), checked = validateEnhancement(value);
+            if (!id || !checked.ok) return false;
+            prepared = null;
+            memory.set(id.key, checked.value);
+            const target = storage();
+            if (!target) return false;
+            try {
+                const dormant = JSON.stringify({...checked.value, enabled: false});
+                target.setItem(id.key, dormant);
+                return target.getItem(id.key) === dormant;
+            } catch (_) {return false;}
+        }
+        function reset(userId, itemId, context) {
+            const id = ids(userId, itemId, context);
+            if (!id) return false;
+            prepared = null;
+            memory.set(id.key, safeEnhancement(null));
+            const target = storage();
+            if (!target) return false;
+            try {target.removeItem(id.key); return target.getItem(id.key) === null;}
+            catch (_) {return false;}
+        }
+        function prepare({api, server, userId, itemId, sourceId = ''} = {}) {
+            prepared = null;
+            const id = ids(userId, itemId, {server, sourceId});
+            userId = identity(userId);
+            if (!id || currentUser(api) !== userId || currentServer(api) !== id.server) return safeEnhancement(null);
+            const config = read(userId, itemId, id);
+            prepared = {api, userId, itemId: id.itemId, sourceId: id.sourceId, server: id.server, config, time: Date.now()};
+            return config;
+        }
+        function consume({api, server, userId, itemId, sourceId = ''} = {}) {
+            const pending = prepared;
+            prepared = null;
+            userId = identity(userId);
+            const age = pending ? Date.now() - pending.time : -1;
+            if (!pending || age < 0 || age > 120000 || pending.api !== api || pending.server !== identity(server) || pending.userId !== userId ||
+                pending.itemId !== identity(itemId) || pending.sourceId !== identity(sourceId) ||
+                currentUser(api) !== userId || currentServer(api) !== pending.server) return null;
+            return Object.freeze({itemId: pending.itemId, config: pending.config});
+        }
+        store = Object.freeze({read, write, reset, prepare, consume, cancel() {prepared = null;}});
+        enhancementStores.set(win, store);
+        return store;
+    }
+
+    const enhancement = Object.freeze({
+        defaults: () => Object.freeze({...enhancementDefaults}), validate: validateEnhancement,
+        safe: safeEnhancement, forPlayback: playbackEnhancement, store: enhancementStore
+    });
+
+    return Object.freeze({describe, plan, codec, language, enhancement});
 });

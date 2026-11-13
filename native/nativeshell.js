@@ -56,6 +56,17 @@ window.NativeShell = {
         showSettingsModal();
     },
 
+    onLocalUserSignedIn() {
+        window.DeepStreamNativeAudio?.sessionChanged(window);
+        window.DeepStreamNativeAudioNegotiation?.sessionChanged(window);
+        return Promise.resolve();
+    },
+
+    onLocalUserSignedOut() {
+        window.DeepStreamNativeAudio?.sessionChanged(window);
+        window.DeepStreamNativeAudioNegotiation?.sessionChanged(window);
+    },
+
     getPlugins() {
         return plugins;
     }
@@ -429,14 +440,14 @@ async function showSettingsModal() {
     back.type = 'button';
     back.id = 'deepstream-settings-back';
     back.className = 'deepstream-back';
-    back.textContent = '← Zurück';
+    back.textContent = '← ' + (window.DeepStreamLocale?.text('Zurück', window.DeepStreamLocale.language(window)) || 'Zurück');
     back.addEventListener('click', closeModal);
     modalHeader.appendChild(back);
 
     const title = document.createElement("h3");
     title.className = "formDialogHeaderTitle";
     title.id = 'deepstream-settings-title';
-    title.textContent = "DeepStream Pro · Einstellungen";
+    title.textContent = "DeepStream Pro · " + (window.DeepStreamLocale?.text('Einstellungen', window.DeepStreamLocale.language(window)) || 'Einstellungen');
     modalHeader.appendChild(title);
 
     const modalContents = document.createElement("div");
@@ -608,7 +619,7 @@ async function showSettingsModal() {
     const creditText = document.createElement('span');
     creditText.textContent = 'Entwickelt von';
     const creditLogo = document.createElement('img');
-    creditLogo.src = jmpInfo.scriptPath + '/dgi-solutions-logo.png';
+    creditLogo.src = jmpInfo.brandImages?.company || jmpInfo.scriptPath + '/dgi-solutions-logo.png';
     creditLogo.alt = 'DGi Solutions';
     credit.append(creditText, creditLogo);
     credit.addEventListener('click', () => window.api.system.openExternalUrl('https://dgi-solutions.de'));
@@ -616,7 +627,7 @@ async function showSettingsModal() {
 
     const close = document.createElement("button");
     close.className = "raised button-cancel block btnCancel formDialogFooterItem emby-button";
-    close.textContent = "Schließen"
+    close.textContent = window.DeepStreamLocale?.text('Schließen', window.DeepStreamLocale.language(window)) || 'Schließen'
     close.addEventListener("click", () => {
         closeModal();
     });

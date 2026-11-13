@@ -1,0 +1,16 @@
+const assert = require('node:assert/strict');
+const {imageKey, memoryCache} = require('../native/artworkCache.js');
+const context = {userId: 'sample-user', id: 'sample-film'};
+const image = {type: 'Backdrop', tag: 'version-a', index: 0, url: 'https://images.example/Items/sample/Images/Backdrop/0?api_key=secret'};
+const key = imageKey(context, image, 'https://server.example');
+assert.equal(key.includes('secret'), false);
+assert.equal(key.includes('api_key'), false);
+assert.notEqual(key, imageKey({...context, userId: 'other'}, image, 'https://server.example'));
+assert.notEqual(key, imageKey(context, {...image, tag: 'version-b'}, 'https://server.example'));
+const cache = memoryCache(2), decoded = {pixels: new Uint8Array(4)};
+cache.set(key, decoded);
+assert.equal(cache.get(key), decoded, 'navigation reuses the already decoded image object');
+cache.set('b', {}); cache.get(key); cache.set('c', {});
+assert.equal(cache.get('b'), undefined);
+assert.equal(cache.get(key), decoded, 'recently used image remains available');
+console.log('Artwork cache: decoded-image reuse, bounded retention, account separation and token-free persistent keys passed.');

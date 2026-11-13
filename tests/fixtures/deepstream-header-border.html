@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Synthetic header border test</title>
+<style>
+body{margin:0;background:#000}
+.MuiAppBar-root,.skinHeader{position:relative;display:block;height:60px}
+.skinHeader{border-bottom:1px solid #fff;box-shadow:0 1px 3px #fff}
+.hide{display:none!important}.videoPlayerContainer{position:fixed;inset:0;pointer-events:none}
+</style>
+<script src="../../native/deepstreamTheme.js"></script>
+</head><body>
+<header id="mui" class="MuiAppBar-root"><div class="MuiToolbar-root"><button id="back">Back</button></div></header>
+<header id="skin" class="skinHeader"><button id="skin-back">Back</button></header>
+<output id="result">PENDING</output>
+<script>
+window.addEventListener('DOMContentLoaded',()=>{
+    const headers=[document.querySelector('#mui'),document.querySelector('#skin')];
+    const back=document.querySelector('#back'),skinBack=document.querySelector('#skin-back');
+    let clicks=0;back.onclick=()=>clicks++;skinBack.onclick=()=>clicks++;
+    const snapshot=()=>headers.map(h=>({border:getComputedStyle(h).borderBottomWidth,
+        shadow:getComputedStyle(h).boxShadow,display:getComputedStyle(h).display}));
+    const before=snapshot();
+    const v=document.createElement('div');v.className='videoPlayerContainer';document.body.append(v);
+    const playback=snapshot();back.click();skinBack.click();
+    headers.forEach(h=>h.classList.add('hide'));const hidden=snapshot();
+    headers.forEach(h=>h.classList.remove('hide'));v.remove();
+    const after=snapshot();back.click();skinBack.click();
+    const ok=!!document.querySelector('#deepstream-theme') &&
+        before.every(h=>h.border==='1px' && h.display==='block') &&
+        playback.every(h=>h.border==='0px' && h.shadow==='none' && h.display==='block') &&
+        hidden.every(h=>h.border==='0px' && h.display==='none') &&
+        after.every(h=>h.border==='1px' && h.display==='block') && clicks===4;
+    document.querySelector('#result').textContent=JSON.stringify({ok,before,playback,hidden,after,backClicks:clicks});
+    document.title=ok?'PASS':'FAIL';
+});
+</script></body></html>

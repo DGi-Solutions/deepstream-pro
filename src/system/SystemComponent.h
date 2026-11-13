@@ -43,6 +43,11 @@ public:
   Q_INVOKABLE void checkServerConnectivity(QString url);
   Q_INVOKABLE void cancelServerConnectivity();
   Q_SIGNAL void serverConnectivityResult(QString url, bool success, QString resolvedUrl);
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND) && defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+  QUrl verifiedHlsBase() const { return m_verifiedHlsBase; }
+  QString verifiedHlsServerId() const { return m_verifiedHlsServerId; }
+  Q_SIGNAL void nativeHlsTrustChanged();
+#endif
 
   static QString extractBaseUrl(const QString& url);
   void resolveUrl(const QString& url, std::function<void(const QString&)> callback);
@@ -140,6 +145,10 @@ private:
   QNetworkReply* m_resolveUrlReply;
   QTimer* m_connectivityRetryTimer;
   QString m_pendingConnectivityUrl;
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND) && defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+  QUrl m_verifiedHlsBase;
+  QString m_verifiedHlsServerId;
+#endif
 
 };
 

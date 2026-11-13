@@ -5,11 +5,19 @@
 - Apple Silicon und macOS SDK 27 oder neuer.
 - Qt 6.11.3 mit WebEngine, WebChannel und Positioning.
 - libmpv mit AVFoundation-Ausgang und eine passende FFmpeg-Laufzeit.
-- CMake, Ninja, pkg-config, Python 3 und Apples Command Line Tools.
+- CMake, Ninja, pkg-config, Python 3, `patch` und Apples Command Line Tools.
 
 Bestehende Homebrew-Installationen erhalten. Wenn eine eigene FFmpeg-Installation verwendet wird, sind inkompatible Core-Pakete nicht darüberzuinstallieren; eine getrennte SDK-Ablage kann über `PKG_CONFIG_PATH` gewählt werden.
 
 ## Build
+
+Nach einem frischen Checkout das benötigte Submodul initialisieren:
+
+```sh
+git submodule update --init external/mpvqt
+```
+
+Der Build prüft die Version der mpvqt-Quellen und wendet die mitgelieferten Anpassungen auf eine separate Kopie an.
 
 ```sh
 mkdir -p /absolute/path/to/new-output

@@ -11,7 +11,7 @@ if [ "$(uname -s)" != Darwin ] || [ "$(uname -m)" != arm64 ]; then
     echo "An Apple Silicon Mac is required." >&2
     exit 1
 fi
-for tool in cmake ninja pkg-config xcrun lipo codesign ditto python3; do
+for tool in cmake ninja pkg-config xcrun lipo codesign ditto python3 patch; do
     if ! command -v "$tool" >/dev/null 2>&1; then
         echo "Missing required build tool: $tool" >&2
         exit 1
@@ -48,13 +48,17 @@ fi
 build_dir=$(mktemp -d "${TMPDIR:-/tmp}/deepstream-pro-build.XXXXXX")
 printf 'Build directory: %s\nSDK: %s\nQt: %s\n' "$build_dir" "$sdk" "$qt_root"
 
+python3 "$source_root/dev/macos/prepare-mpvqt.py" "$source_root/external/mpvqt" "$build_dir/mpvqt-source"
+
 cmake -S "$source_root" -B "$build_dir" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_OSX_ARCHITECTURES=arm64 \
+    -DCMAKE_OSX_DEPLOYMENT_TARGET=27.2 \
     -DCMAKE_OSX_SYSROOT=macosx \
     -DCMAKE_INSTALL_PREFIX="$build_dir/output" \
     -DQTROOT="$qt_root" \
     -DCMAKE_PREFIX_PATH="$qt_root" \
+    -DDEEPSTREAM_MPVQT_SOURCE_DIR="$build_dir/mpvqt-source/src" \
     -DUSE_STATIC_MPVQT=ON \
     -DCHECK_FOR_UPDATES=OFF
 cmake --build "$build_dir" --target install --parallel 4

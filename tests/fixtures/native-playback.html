@@ -1,0 +1,20 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Native playback transparency regression</title>
+<style>body {margin:0;} html.transparentDocument,html.transparentDocument body {background:transparent;} .libraryPage{width:100vw;min-height:100vh;} .videoPlayerContainer{position:fixed;inset:0;pointer-events:none;} .dialog{padding:20px;} pre{white-space:pre-wrap;color:white;}</style>
+<script src="/native/deepstreamTheme.js"></script></head>
+<body><main><div class="page libraryPage mainAnimatedPage"><aside class="dialog"><button id="pause">Pause</button><pre id="results" role="status">Running…</pre></aside></div></main>
+<script>
+addEventListener('load',()=>{
+ const page=document.querySelector('.libraryPage'), out=document.getElementById('results');
+ const checks=[]; const check=(name,ok)=>checks.push({name,ok});
+ check('library background is dark before playback',getComputedStyle(page).backgroundColor==='rgb(9, 9, 9)');
+ const player=document.createElement('div');player.className='videoPlayerContainer';document.body.appendChild(player);
+ document.documentElement.classList.add('transparentDocument');
+ check('native playback page reveals the video',getComputedStyle(page).backgroundColor==='rgba(0, 0, 0, 0)');
+ check('OSD panel retains its background',getComputedStyle(document.querySelector('.dialog')).backgroundColor==='rgb(19, 19, 19)');
+ check('playback control remains visible',getComputedStyle(document.getElementById('pause')).visibility==='visible');
+ document.documentElement.classList.remove('transparentDocument');player.remove();
+ check('library appearance returns after stopping',getComputedStyle(page).backgroundColor==='rgb(9, 9, 9)');
+ out.textContent=JSON.stringify(checks,null,2);out.dataset.passed=String(checks.every(c=>c.ok));
+});
+</script></body></html>

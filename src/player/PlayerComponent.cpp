@@ -1,4 +1,5 @@
 #include "PlayerComponent.h"
+#include "LocalMediaController.h"
 #include <QString>
 #include <Qt>
 #include <QDir>
@@ -19,10 +20,31 @@
 #include "input/InputComponent.h"
 #include <MpvController>
 
+#include <algorithm>
+#include <cmath>
 #include <math.h>
 #include <string.h>
 #include <shared/Paths.h>
 #include <QRegularExpression>
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+#include "NativeAVBackend.h"
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+#include "NativeHlsSession.h"
+#include "NativeAudioHlsRoute.h"
+#ifdef DEEPSTREAM_EXPERIMENTAL_DOLBY_VISION_AUDIO_V2
+#include "NativeHlsAudioCodecPolicy.h"
+#endif
+#include "HlsSessionRelay.h"
+#include <QUrlQuery>
+#include <QScopedValueRollback>
+#endif
+#include <QCryptographicHash>
+#include <QNetworkReply>
+#include <QNetworkRequest>
+#endif
+#ifdef Q_OS_MAC
+#include <CoreAudio/CoreAudio.h>
+#endif
 
 #if !defined(Q_OS_WIN)
 #include <unistd.h>
@@ -58,14 +80,60 @@ PlayerComponent::PlayerComponent(QObject* parent)
   qmlRegisterType<MpvVideoItem>("Konvergo", 1, 0, "MpvVideo"); // deprecated name
   qmlRegisterType<MpvVideoItem>("Konvergo", 1, 0, "KonvergoVideo");
   qmlRegisterType<MpvVideoItem>("Konvergo", 1, 0, "MpvVideoItem");
+  qmlRegisterType<LocalMediaController>("Konvergo", 1, 0, "LocalMediaController");
 
   m_restoreDisplayTimer.setSingleShot(true);
   connect(&m_restoreDisplayTimer, &QTimer::timeout, this, &PlayerComponent::onRestoreDisplay);
 
   connect(&DisplayComponent::Get(), &DisplayComponent::refreshRateChanged, this, &PlayerComponent::onRefreshRateChange);
 
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  m_nativeHlsSession=std::make_unique<NativeHlsSession>([this]{
+    NativeHlsSession::Context context;context.verifiedBase=SystemComponent::Get().verifiedHlsBase();
+    context.verifiedServerId=SystemComponent::Get().verifiedHlsServerId();
+    if(m_window){if(QObject* web=m_window->findChild<QObject*>("web")){
+      context.webUrl=web->property("url").toUrl();
+      context.mainFrameReady=web->property("nativeHlsMainFrameReady").toBool()&&!web->property("loading").toBool();
+    }}
+    return context;
+  });
+  connect(m_nativeHlsSession.get(),&NativeHlsSession::bindingResult,this,&PlayerComponent::nativeAudioSessionBindingResult);
+  connect(&SystemComponent::Get(),&SystemComponent::nativeHlsTrustChanged,this,&PlayerComponent::clearNativeAudioSession);
+#endif
+  m_avFixtureTimeout.setSingleShot(true);
+  m_avFixtureAudioPoll.setInterval(100);
+  connect(&m_avFixtureAudioPoll, &QTimer::timeout, this, &PlayerComponent::checkAVFixtureAudioSelection);
+  connect(&m_avFixtureTimeout, &QTimer::timeout, this, [this] {
+    if (m_avFixturePhase == AVFixturePhase::Starting) {
+      if (m_avFixtureSeekPending) qWarning() << "fixture_seek_timeout";
+      else if (m_avFixtureVideoReady && m_avFixtureBackend)
+        qWarning() << "fixture_audio_selection_timeout" << m_avFixtureBackend->audioSelectionState(m_avFixtureGeneration);
+      else qWarning() << "fixture_video_ready_timeout";
+      fallbackAVFixture();
+    } else if (m_avFixturePhase == AVFixturePhase::Draining) failAVFixture(QStringLiteral("fixture_mpv_stop_timeout"));
+  });
+#endif
+
   m_reloadAudioTimer.setSingleShot(true);
   connect(&m_reloadAudioTimer, &QTimer::timeout, this, &PlayerComponent::updateAudioDevice);
+#ifdef Q_OS_MAC
+  m_audioOutputMonitorTimer.setInterval(500);
+  connect(&m_audioOutputMonitorTimer, &QTimer::timeout, this, [this]() {
+    const quint32 current = defaultAudioOutputDevice();
+    if (current == m_audioOutputDevice)
+      return;
+    m_audioOutputDevice = current;
+    invalidateAudioEnhancementRoute();
+    // A default-device switch need not emit a new mpv reconfiguration event.
+    // Retry once after the system route settles, only for the same playlist item.
+    const qint64 entry = m_audioEnhancementSession.activeEntry();
+    QTimer::singleShot(250, this, [this, entry]() {
+      if (entry >= 0 && currentPlayingEntryId() == entry && m_audioEnhancementSession.loaded(entry))
+        refreshAudioEnhancement();
+    });
+  });
+#endif
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////
@@ -284,19 +352,93 @@ void PlayerComponent::setWindow(QQuickWindow* window)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool PlayerComponent::load(const QString& url, const QVariantMap& options, const QVariantMap &metadata, const QVariant& audioStream , const QVariant& subtitleStream)
 {
-  stop();
-  queueMedia(url, options, metadata, audioStream, subtitleStream);
-  return true;
+  emit playbackOwnerChangeRequested();
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  const AVFixtureLoadRequest request{url,options,metadata,audioStream,subtitleStream,std::nullopt,std::nullopt,std::nullopt};
+  const auto result=m_avFixtureLoads.load(request);
+  if(result.disposition==DeferredLoadGate<AVFixtureLoadRequest>::LoadDisposition::Rejected) return false;
+  if(result.disposition==DeferredLoadGate<AVFixtureLoadRequest>::LoadDisposition::Deferred) {
+    m_avFixtureCancelRequested=true;
+    return true;
+  }
+  return loadAccepted(url,options,metadata,audioStream,subtitleStream,result.revision);
+#else
+  return loadAccepted(url,options,metadata,audioStream,subtitleStream,0);
+#endif
+}
+
+bool PlayerComponent::loadAccepted(const QString& url, const QVariantMap& options, const QVariantMap& metadata,
+                                   const QVariant& audioStream, const QVariant& subtitleStream, quint64 revision)
+{
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(!m_avFixtureLoads.isCurrent(revision)) return false;
+  if(m_avFixturePhase!=AVFixturePhase::Idle) {
+    if(!cancelAVFixture(false) || !m_avFixtureLoads.isCurrent(revision)) return false;
+  }
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  if(options.contains(QStringLiteral("nativeAudioHls")))
+    return startNativeAudioHls(url,options,metadata,audioStream,subtitleStream);
+#endif
+  if(startAVFixture(url,options,metadata,audioStream,subtitleStream)) return true;
+#else
+  Q_UNUSED(revision);
+#endif
+  stopPlaybackInternal();
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(!m_avFixtureLoads.isCurrent(revision)) return false;
+#endif
+  if (!m_mpv || m_audioEnhancementBoundaryFailed)
+    return false;
+
+  // Only load() prepares an item; arbitrary queued files remain neutral.
+  const QString token = options.value("audioEnhancementSession").toString();
+  const bool validToken = !token.isEmpty() && token.size() <= 128 &&
+      QRegularExpression(QStringLiteral("^[A-Za-z0-9_-]+$")).match(token).hasMatch();
+  m_audioEnhancementSession.prepare(validToken ? token.toStdString() : std::string());
+  QString error;
+  m_pendingAudioEnhancement = sanitizeAudioEnhancement(options.value("audioEnhancement").toMap(), &error);
+  m_pendingAudioEnhancementReason = error.isEmpty() ? QStringLiteral("awaiting_audio") : error;
+  m_audioEnhancementLoadPrepared = validToken;
+  m_lastQueueSucceeded = false;
+  queueMediaInternal(url, options, metadata, audioStream, subtitleStream);
+  m_audioEnhancementLoadPrepared = false;
+  return m_lastQueueSucceeded;
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::queueMedia(const QString& url, const QVariantMap& options, const QVariantMap &metadata, const QVariant& audioStream, const QVariant& subtitleStream)
 {
+  emit playbackQueueChangeRequested();
+  queueMediaInternal(url, options, metadata, audioStream, subtitleStream);
+}
+
+void PlayerComponent::queueMediaInternal(const QString& url, const QVariantMap& options, const QVariantMap &metadata, const QVariant& audioStream, const QVariant& subtitleStream)
+{
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if (m_avFixturePhase != AVFixturePhase::Idle) return;
+#endif
   if (!m_mpv) {
     qWarning() << "PlayerComponent::queueMedia: mpv not initialized yet";
     return;
   }
 
+  m_lastQueueSucceeded = false;
+  if (m_audioEnhancementBoundaryFailed)
+    return;
+  QSet<qint64> playlistBefore;
+  bool beforeKnown = false;
+  if (m_audioEnhancementLoadPrepared) {
+    const QVariant value = m_mpv->getProperty("playlist");
+    beforeKnown = value.metaType().id() == QMetaType::QVariantList;
+    if (beforeKnown) {
+      for (const QVariant& entry : value.toList()) {
+        bool ok = false;
+        const qint64 id = entry.toMap().value("id").toLongLong(&ok);
+        if (!ok || id < 0) { beforeKnown = false; break; }
+        playlistBefore.insert(id);
+      }
+    }
+  }
   InputComponent::Get().cancelAutoRepeat();
 
   m_mediaFrameRate = metadata["frameRate"].toFloat(); // returns 0 on failure
@@ -344,10 +486,35 @@ void PlayerComponent::queueMedia(const QString& url, const QVariantMap& options,
 
   command << extraArgs;
 
-  m_mpv->command( command);
+  const QVariant commandResult = m_mpv->command(command);
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if (commandResult.metaType().id()!=qMetaTypeId<ErrorReturn>()) m_avFixtureMpvLoadPending=true;
+#endif
+  if (commandResult.metaType().id() == qMetaTypeId<ErrorReturn>()) {
+    m_audioEnhancementSession.queued(-1);
+    return;
+  }
+  m_lastQueueSucceeded = true;
+  if (m_audioEnhancementLoadPrepared) {
+    const QVariant value = m_mpv->getProperty("playlist");
+    QSet<qint64> appended;
+    if (beforeKnown && value.metaType().id() == QMetaType::QVariantList) {
+      for (const QVariant& entry : value.toList()) {
+        bool ok = false;
+        const qint64 id = entry.toMap().value("id").toLongLong(&ok);
+        if (!ok || id < 0) { appended.clear(); beforeKnown = false; break; }
+        if (!playlistBefore.contains(id)) appended.insert(id);
+      }
+    }
+    m_audioEnhancementSession.queued(beforeKnown && appended.size() == 1 ? *appended.constBegin() : -1);
+  }
 
   QVariantMap jellyfinMetadata = metadata["metadata"].toMap();
   QUrl jellyfinBaseUrl = qurl.adjusted(QUrl::RemovePath | QUrl::RemoveQuery);
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND) && defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+  if(m_nativeFallbackMetadataOrigin.isValid() && !m_nativeFallbackMetadataOrigin.isEmpty())
+    jellyfinBaseUrl=m_nativeFallbackMetadataOrigin;
+#endif
   emit onMetaData(jellyfinMetadata, jellyfinBaseUrl);
 
   // Request album art from the provider
@@ -501,16 +668,52 @@ void PlayerComponent::updatePlaybackState()
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::handleMpvEvent(mpv_event *event)
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(event->event_id==MPV_EVENT_FILE_LOADED || event->event_id==MPV_EVENT_END_FILE) m_avFixtureMpvLoadPending=false;
+#endif
   switch (event->event_id)
   {
     case MPV_EVENT_START_FILE:
     {
       m_inPlayback = true;
+      const auto *start = static_cast<const mpv_event_start_file*>(event->data);
+      const qint64 entry = start ? start->playlist_entry_id : -1;
+      m_mpvLoadEvidence.start(entry);
+      if (entry >= 0) emit mpvEntryStarted(entry);
+      if (m_audioEnhancementSession.start(entry)) {
+        m_audioEnhancement = m_pendingAudioEnhancement;
+        m_audioEnhancementReason = m_pendingAudioEnhancementReason;
+        m_pendingAudioEnhancement.clear();
+        m_audioEnhancementPlanFresh = true;
+      } else {
+        m_audioEnhancement.clear();
+        m_audioEnhancementReason = QStringLiteral("disabled");
+        m_audioEnhancementPlanFresh = false;
+      }
+#ifdef Q_OS_MAC
+      m_audioOutputDevice = defaultAudioOutputDevice();
+      m_audioOutputMonitorTimer.start();
+#endif
       break;
     }
     case MPV_EVENT_END_FILE:
     {
       auto *endFile = static_cast<mpv_event_end_file*>(event->data);
+      if (endFile) {
+        m_mpvLoadEvidence.end(endFile->playlist_entry_id);
+        if (endFile->reason == MPV_END_FILE_REASON_ERROR)
+          emit mpvEntryFailed(endFile->playlist_entry_id);
+      }
+      const bool endedEnhancement = endFile && m_audioEnhancementSession.end(endFile->playlist_entry_id);
+      if (endedEnhancement) {
+        if (!removeAudioEnhancementAtBoundary())
+          m_audioEnhancementReason = QStringLiteral("filter_remove_failed");
+        m_audioEnhancement.clear();
+        m_audioEnhancementPlanFresh = false;
+      }
+#ifdef Q_OS_MAC
+      if (endedEnhancement && !m_audioEnhancementSession.pending()) m_audioOutputMonitorTimer.stop();
+#endif
 
       m_inPlayback = false;
       m_playbackCanceled = false;
@@ -537,6 +740,18 @@ void PlayerComponent::handleMpvEvent(mpv_event *event)
       if (!m_streamSwitchImminent)
         m_restoreDisplayTimer.start(0);
       m_streamSwitchImminent = false;
+      break;
+    }
+    case MPV_EVENT_FILE_LOADED:
+    case MPV_EVENT_AUDIO_RECONFIG:
+    {
+      const qint64 playingEntry = currentPlayingEntryId();
+      if (event->event_id == MPV_EVENT_FILE_LOADED) {
+        const qint64 loaded = m_mpvLoadEvidence.loaded(playingEntry);
+        if (loaded >= 0) emit mpvEntryLoaded(loaded);
+      }
+      if (m_audioEnhancementSession.loaded(playingEntry))
+        refreshAudioEnhancement();
       break;
     }
     case MPV_EVENT_PROPERTY_CHANGE:
@@ -616,19 +831,16 @@ void PlayerComponent::handleMpvEvent(mpv_event *event)
     case MPV_EVENT_LOG_MESSAGE:
     {
       auto *msg = static_cast<mpv_event_log_message*>(event->data);
-      // Strip the trailing '\n'
-      size_t len = strlen(msg->text);
-      if (len > 0 && msg->text[len - 1] == '\n')
-        len -= 1;
-      QString logline = QString::fromUtf8(msg->prefix) + ": " + QString::fromUtf8(msg->text, static_cast<int>(len));
+      // libmpv messages and prefixes may contain stream URLs and local paths.
+      // Retain severity without persisting arbitrary media metadata.
       if (msg->log_level >= MPV_LOG_LEVEL_V)
-        qDebug() << qPrintable(logline);
+        qDebug() << "mpv log event";
       else if (msg->log_level >= MPV_LOG_LEVEL_INFO)
-        qInfo() << qPrintable(logline);
+        qInfo() << "mpv log event";
       else if (msg->log_level >= MPV_LOG_LEVEL_WARN)
-        qWarning() << qPrintable(logline);
+        qWarning() << "mpv log event";
       else
-        qCritical() << qPrintable(logline);
+        qCritical() << "mpv log event";
       break;
     }
     case MPV_EVENT_CLIENT_MESSAGE:
@@ -642,6 +854,11 @@ void PlayerComponent::handleMpvEvent(mpv_event *event)
       // We use this to block loading until we explicitly tell it to continue.
       if (!strcmp(msg->args[1], "1"))
       {
+        if (!removeAudioEnhancementAtBoundary()) {
+          m_mpv->command(QStringList() << "stop");
+          m_mpv->command(QStringList() << "hook-ack" << resumeId);
+          break;
+        }
         // Calling this lambda will instruct mpv to continue loading the file.
         auto resume = [=] {
           qInfo() << "resuming loading";
@@ -682,6 +899,11 @@ void PlayerComponent::handleMpvEvent(mpv_event *event)
 
       if (!strcmp(hook->name, "on_load"))
       {
+        if (!removeAudioEnhancementAtBoundary()) {
+          m_mpv->command(QStringList() << "stop");
+          mpv_hook_continue(m_mpv->mpv(), id);
+          break;
+        }
         // Calling this lambda will instruct mpv to continue loading the file.
         auto resume = [=] {
           qInfo() << "resuming loading";
@@ -727,8 +949,40 @@ void PlayerComponent::handleMpvEvents()
     mpv_event *event = mpv_wait_event(m_mpv->mpv(), 0);
     if (event->event_id == MPV_EVENT_NONE)
       break;
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+    if (m_avFixturePhase == AVFixturePhase::Draining || m_avFixturePhase == AVFixturePhase::Starting || m_avFixturePhase == AVFixturePhase::Active ||
+        (m_avFixturePhase == AVFixturePhase::Hashing && m_suppressMpvDuringDeferredHash)) {
+      if(m_avFixturePhase==AVFixturePhase::Hashing && m_suppressMpvDuringDeferredHash && event->event_id==MPV_EVENT_START_FILE) {
+        m_avFixtureLoads.failClosed();
+        m_mpv->command(QStringList()<<"stop");
+        failAVFixture(QStringLiteral("fixture_unexpected_mpv_start"));
+        return;
+      }
+      if(m_avFixturePhase==AVFixturePhase::Hashing && m_suppressMpvDuringDeferredHash && event->event_id==MPV_EVENT_END_FILE)
+        m_avFixtureMpvLoadPending=false;
+      if ((m_avFixturePhase == AVFixturePhase::Starting || m_avFixturePhase == AVFixturePhase::Active) && event->event_id == MPV_EVENT_START_FILE) {
+        if(m_avFixtureBackend) m_avFixtureBackend->setMuted(m_avFixtureGeneration,true);
+        m_mpv->command(QStringList()<<"stop");
+        failAVFixture(QStringLiteral("native_unexpected_mpv_start"));
+        return;
+      }
+      if (m_avFixturePhase == AVFixturePhase::Draining && event->event_id == MPV_EVENT_START_FILE) {
+        m_avFixtureMpvLoadPending=true;m_avFixtureFence.startFile(m_avFixtureGeneration);
+      }
+      if (m_avFixturePhase == AVFixturePhase::Draining && event->event_id == MPV_EVENT_END_FILE && event->data)
+        m_avFixtureFence.endFile(m_avFixtureGeneration, static_cast<mpv_event_end_file*>(event->data)->playlist_entry_id);
+      if (event->event_id == MPV_EVENT_HOOK || event->event_id == MPV_EVENT_CLIENT_MESSAGE)
+        handleMpvEvent(event);
+      continue;
+    }
+#endif
     handleMpvEvent(event);
   }
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if (m_avFixturePhase == AVFixturePhase::Draining) { advanceAVFixtureDrain(); return; }
+  if (m_avFixturePhase == AVFixturePhase::Starting || m_avFixturePhase == AVFixturePhase::Active ||
+      (m_avFixturePhase == AVFixturePhase::Hashing && m_suppressMpvDuringDeferredHash)) return;
+#endif
   // Once we got all status updates, determine the new canonical state.
   updatePlaybackState();
 }
@@ -747,6 +1001,12 @@ void PlayerComponent::setVideoOnlyMode(bool enable)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::play()
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase==AVFixturePhase::Draining && m_avFixtureLoads.mutatePending(m_avFixtureLoads.revision(),[](auto& request){request.options.insert("autoplay",true);}))return;
+  if (m_avFixturePhase == AVFixturePhase::Hashing) m_avFixtureAutoplay=true;
+  if (m_avFixturePhase == AVFixturePhase::Draining || m_avFixturePhase == AVFixturePhase::Starting) { m_avFixtureAutoplay=true; return; }
+  if (m_avFixturePhase == AVFixturePhase::Active) { m_avFixtureBackend->play(m_avFixtureGeneration); return; }
+#endif
   if (!m_mpv) {
     qWarning() << "PlayerComponent::play: mpv not initialized yet";
     return;
@@ -830,6 +1090,40 @@ void PlayerComponent::notifyVolumeChange(double volume)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::stop()
 {
+  emit playbackOwnerChangeRequested();
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  m_avFixtureLoads.stop();
+#endif
+  stopPlaybackInternal();
+}
+
+void PlayerComponent::stopPlaybackInternal()
+{
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  if(m_avFixturePhase!=AVFixturePhase::Draining)m_nativeFallbackRelay.reset();
+#endif
+  if (m_avFixturePhase == AVFixturePhase::Draining) { m_avFixtureCancelRequested=true; return; }
+  if (m_avFixturePhase != AVFixturePhase::Idle) {
+    const bool hashing = m_avFixturePhase == AVFixturePhase::Hashing;
+    const auto revision=m_avFixtureLoads.revision();
+    if(!cancelAVFixture(true))return;
+    if (!hashing || revision!=m_avFixtureLoads.revision()) return;
+  }
+#endif
+  m_audioEnhancementSession.stop();
+  m_audioEnhancementPlanFresh = false;
+  m_audioEnhancementLoadPrepared = false;
+  m_pendingAudioEnhancement.clear();
+#ifdef Q_OS_MAC
+  m_audioOutputMonitorTimer.stop();
+#endif
+  if (!removeAudioEnhancementAtBoundary())
+    m_audioEnhancementReason = QStringLiteral("filter_remove_failed");
+  else {
+    m_audioEnhancement.clear();
+    m_audioEnhancementReason = QStringLiteral("disabled");
+  }
   if (!m_mpv) {
     qWarning() << "PlayerComponent::stop: mpv not initialized yet";
     return;
@@ -841,6 +1135,7 @@ void PlayerComponent::stop()
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::clearQueue()
 {
+  emit playbackQueueChangeRequested();
   if (!m_mpv) {
     qWarning() << "PlayerComponent::clearQueue: mpv not initialized yet";
     return;
@@ -852,6 +1147,12 @@ void PlayerComponent::clearQueue()
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::pause()
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase==AVFixturePhase::Draining && m_avFixtureLoads.mutatePending(m_avFixtureLoads.revision(),[](auto& request){request.options.insert("autoplay",false);}))return;
+  if (m_avFixturePhase == AVFixturePhase::Hashing) m_avFixtureAutoplay=false;
+  if (m_avFixturePhase == AVFixturePhase::Draining || m_avFixturePhase == AVFixturePhase::Starting) { m_avFixtureAutoplay=false; return; }
+  if (m_avFixturePhase == AVFixturePhase::Active) { m_avFixtureBackend->pause(m_avFixtureGeneration); return; }
+#endif
   if (!m_mpv) {
     qWarning() << "PlayerComponent::pause: mpv not initialized yet";
     return;
@@ -863,6 +1164,12 @@ void PlayerComponent::pause()
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::seekTo(qint64 ms)
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase==AVFixturePhase::Draining && m_avFixtureLoads.mutatePending(m_avFixtureLoads.revision(),[ms](auto& request){request.options.insert("startMilliseconds",qMax<qint64>(0,ms));}))return;
+  if (m_avFixturePhase == AVFixturePhase::Hashing) m_avFixtureSeek=qMax<qint64>(0,ms);
+  if (m_avFixturePhase == AVFixturePhase::Draining || m_avFixturePhase == AVFixturePhase::Starting) { m_avFixtureSeek=qMax<qint64>(0,ms); return; }
+  if (m_avFixturePhase == AVFixturePhase::Active) { m_avFixtureBackend->seek(m_avFixtureGeneration,ms); return; }
+#endif
   if (!m_mpv) {
     qWarning() << "PlayerComponent::seekTo: mpv not initialized yet";
     return;
@@ -889,12 +1196,17 @@ void PlayerComponent::setAudioDevice(const QString& name)
     qWarning() << "PlayerComponent::setAudioDevice: mpv not initialized yet";
     return;
   }
+  invalidateAudioEnhancementRoute();
   m_mpv->setProperty( "audio-device", name);
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::setVolume(int volume)
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase==AVFixturePhase::Draining && m_avFixtureLoads.mutatePending(m_avFixtureLoads.revision(),[volume](auto& request){request.volume=qBound(0,volume,100);}))return;
+  if (m_avFixturePhase != AVFixturePhase::Idle && m_avFixturePhase != AVFixturePhase::Hashing) { m_avFixtureVolume=qBound(0,volume,100); if(m_avFixturePhase==AVFixturePhase::Active) m_avFixtureBackend->setVolume(m_avFixtureGeneration,m_avFixtureVolume); return; }
+#endif
   if (!m_mpv) {
     qWarning() << "PlayerComponent::setVolume: mpv not initialized yet";
     return;
@@ -906,6 +1218,9 @@ void PlayerComponent::setVolume(int volume)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 int PlayerComponent::volume()
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase==AVFixturePhase::Active)return m_avFixtureBackend->volume(m_avFixtureGeneration);
+#endif
   if (!m_mpv) {
     qWarning() << "PlayerComponent::volume: mpv not initialized yet";
     return 0;
@@ -919,6 +1234,10 @@ int PlayerComponent::volume()
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::setMuted(bool muted)
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase==AVFixturePhase::Draining && m_avFixtureLoads.mutatePending(m_avFixtureLoads.revision(),[muted](auto& request){request.muted=muted;}))return;
+  if (m_avFixturePhase != AVFixturePhase::Idle && m_avFixturePhase != AVFixturePhase::Hashing) { m_avFixtureMuted=muted; if(m_avFixturePhase==AVFixturePhase::Active) m_avFixtureBackend->setMuted(m_avFixtureGeneration,muted); return; }
+#endif
   if (!m_mpv) {
     qWarning() << "PlayerComponent::setMuted: mpv not initialized yet";
     return;
@@ -930,6 +1249,9 @@ void PlayerComponent::setMuted(bool muted)
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 bool PlayerComponent::muted()
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase==AVFixturePhase::Active)return m_avFixtureBackend->muted(m_avFixtureGeneration);
+#endif
   if (!m_mpv) {
     qWarning() << "PlayerComponent::muted: mpv not initialized yet";
     return false;
@@ -1074,6 +1396,19 @@ void PlayerComponent::reselectStream(const QVariant &streamSelection, MediaType 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::setSubtitleStream(const QVariant &subtitleStream)
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase==AVFixturePhase::Draining && m_avFixtureLoads.mutatePending(m_avFixtureLoads.revision(),[subtitleStream](auto& request){request.subtitle=subtitleStream;}))return;
+  if (m_avFixturePhase != AVFixturePhase::Idle) {
+    bool ok=false;const int selected=subtitleStream.toInt(&ok);
+    if(!ok || selected!=-1) {
+      m_avFixtureSubtitle=subtitleStream;
+      if(m_avFixturePhase==AVFixturePhase::Hashing || m_avFixturePhase==AVFixturePhase::Starting) fallbackAVFixture();
+      else if(m_avFixturePhase==AVFixturePhase::Draining) m_avFixtureCancelRequested=true;
+      else failAVFixture(QStringLiteral("fixture_subtitle_unavailable"));
+    }
+    return;
+  }
+#endif
   m_currentSubtitleStream = subtitleStream;
   reselectStream(m_currentSubtitleStream, MediaType::Subtitle);
 }
@@ -1083,6 +1418,24 @@ QVariantMap PlayerComponent::getAudioCapabilities() const
 {
   QVariantMap result;
   result.insert("engine", "libmpv");
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+#ifdef DEEPSTREAM_EXPERIMENTAL_AV_FIXTURE
+  result.insert("experimentalAvFixtureAvailable", true);
+#endif
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  result.insert("nativeAudioHlsAvailable", m_mpv && m_mpv->fixtureIsolationConfirmed() && m_window && nativeAudioHlsRouteAllowed());
+#ifdef DEEPSTREAM_EXPERIMENTAL_DOLBY_VISION_HLS
+  // This build opt-in is not a hardware or output-format detection API.
+  const bool nativeDvAvailable=m_mpv && m_mpv->fixtureIsolationConfirmed() && m_window && nativeAudioHlsRouteAllowed(true);
+  result.insert("nativeDolbyVisionHlsAvailable", nativeDvAvailable);
+#ifdef DEEPSTREAM_EXPERIMENTAL_DOLBY_VISION_AUDIO_V2
+  result.insert("nativeDolbyVisionAudioHlsV2", QVariantMap{
+    {QStringLiteral("available"),nativeDvAvailable},
+    {QStringLiteral("codecs"),QStringList{QStringLiteral("aac"),QStringLiteral("ac3"),QStringLiteral("eac3"),QStringLiteral("flac"),QStringLiteral("alac")}}});
+#endif
+#endif
+#endif
+#endif
   result.insert("decoderEnumerationAvailable", false);
   result.insert("decoders", QStringList());
   // The current libmpv PCM path does not expose a verified object renderer.
@@ -1111,11 +1464,58 @@ QVariantMap PlayerComponent::getAudioCapabilities() const
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
+#ifdef DEEPSTREAM_HLS_CONTROLLED_MPV_TEST
+QVariantMap PlayerComponent::getControlledSwitchDiagnostics() const
+{
+  QVariantMap result;result.insert("nativeActive",m_avFixturePhase==AVFixturePhase::Active);
+  if(!m_mpv)return result;
+  const QVariant ao=m_mpv->getProperty("current-ao");
+  const bool inactive=(ao.metaType().id()==qMetaTypeId<ErrorReturn>() && ao.value<ErrorReturn>().error==MPV_ERROR_PROPERTY_UNAVAILABLE) ||
+                      (ao.metaType().id()==QMetaType::QString && ao.toString().isEmpty());
+  const bool active=ao.metaType().id()==QMetaType::QString && !ao.toString().isEmpty() && ao.toString()!=QStringLiteral("null");
+  const QVariantMap video=m_mpv->getProperty("video-params").toMap();
+  result.insert("mpvAoActive",active);result.insert("mpvAoInactive",inactive);
+  result.insert("mpvVideoDecoded",video.value("w").toInt()>0 && video.value("h").toInt()>0);
+  return result;
+}
+#endif
+QVariantMap PlayerComponent::getVideoSignalPath() const
+{
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase == AVFixturePhase::Active && m_avFixtureBackend){
+    QVariantMap result=m_avFixtureBackend->videoSelectionEvidence(m_avFixtureGeneration);
+    result.insert(QStringLiteral("backend"),QStringLiteral("avplayer"));
+    return result;
+  }
+#endif
+  return {{QStringLiteral("backend"),QStringLiteral("mpv")},
+          {QStringLiteral("status"),QStringLiteral("unknown")},
+          {QStringLiteral("outputConfirmed"),false}};
+}
+
 QVariantMap PlayerComponent::getAudioSignalPath() const
 {
   QVariantMap result;
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if (m_avFixturePhase == AVFixturePhase::Active) {
+    result.insert("backend", "avplayer");result.insert("engine", "AVPlayer");result.insert("outputDriver", "AVFoundation");
+    result.insert("objectRenderingConfirmed", false);
+    QVariantMap evidence{{"status", "fixture_joc_declared"}};
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+    if(m_nativeAudioHls)evidence.insert("status",m_nativeAudioHlsCodec + QStringLiteral("_verified"));
+#endif
+    if (m_avFixtureBackend) {
+      const QVariantMap audioEvidence=m_avFixtureBackend->audioSelectionEvidence(m_avFixtureGeneration);
+      for (const QString& key : {QStringLiteral("availableAudioOptions"), QStringLiteral("selectedAudioOptions")})
+        if (audioEvidence.contains(key)) evidence.insert(key,audioEvidence.value(key));
+    }
+    result.insert("sourceEvidence",evidence);return result;
+  }
+#endif
+  result.insert("backend", "mpv");
   result.insert("engine", "libmpv");
   result.insert("objectRenderingConfirmed", false);
+  result.insert("sourceEvidence", QVariantMap{{"status", "unknown"}});
   if (!m_mpv)
     return result;
   result.insert("decoder", m_mpv->getProperty("audio-codec-name"));
@@ -1137,6 +1537,21 @@ QVariantMap PlayerComponent::getAudioSignalPath() const
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::setAudioStream(const QVariant &audioStream)
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase==AVFixturePhase::Draining && m_avFixtureLoads.mutatePending(m_avFixtureLoads.revision(),[audioStream](auto& request){request.audio=audioStream;}))return;
+  if (m_avFixturePhase != AVFixturePhase::Idle) {
+    bool ok=false;const int selected=audioStream.toInt(&ok);
+    if(!ok || selected!=1) {
+      m_avFixtureAudio=audioStream;
+      if(m_avFixturePhase==AVFixturePhase::Hashing || m_avFixturePhase==AVFixturePhase::Starting) fallbackAVFixture();
+      else if(m_avFixturePhase==AVFixturePhase::Draining) m_avFixtureCancelRequested=true;
+      else failAVFixture(QStringLiteral("fixture_audio_selection_unavailable"));
+    }
+    return;
+  }
+#endif
+  m_audioEnhancementPlanFresh = false;
+  invalidateAudioEnhancementRoute();
   m_currentAudioStream = audioStream;
   reselectStream(m_currentAudioStream, MediaType::Audio);
 }
@@ -1172,6 +1587,11 @@ void PlayerComponent::setSubtitleDelay(qint64 milliseconds)
 /////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::setPlaybackRate(int rate)
 {
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+  if(m_avFixturePhase==AVFixturePhase::Draining && m_avFixtureLoads.mutatePending(m_avFixtureLoads.revision(),[rate](auto& request){request.rate=rate;}))return;
+  if (m_avFixturePhase == AVFixturePhase::Draining || m_avFixturePhase == AVFixturePhase::Starting) { m_avFixtureRate=rate; return; }
+  if (m_avFixturePhase == AVFixturePhase::Active) { m_avFixtureRate=rate; m_avFixtureBackend->setRate(m_avFixtureGeneration,rate); emit playbackRateChanged(rate/1000.0); return; }
+#endif
   if (!m_mpv) {
     qWarning() << "PlayerComponent::setPlaybackRate: mpv not initialized yet";
     return;
@@ -1276,6 +1696,8 @@ void PlayerComponent::updateAudioDevice()
     device = "auto";
   }
 
+  if (m_mpv->getProperty("audio-device").toString() != device)
+    invalidateAudioEnhancementRoute();
   m_mpv->setProperty( "audio-device", device);
 }
 
@@ -1284,6 +1706,9 @@ void PlayerComponent::updateAudioConfiguration()
 {
   setAudioConfiguration();
   setOtherConfiguration();
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND) && defined(DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS)
+  if((m_nativeAudioHls || m_nativeFallbackRelay) && !nativeAudioHlsRouteAllowed(m_nativeVideoHls))clearNativeAudioSession();
+#endif
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1586,6 +2011,9 @@ void PlayerComponent::setVideoConfiguration()
 ///////////////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::setOtherConfiguration()
 {
+#if defined(Q_OS_MAC) && (defined(DEEPSTREAM_EXPERIMENTAL_AV_FIXTURE) || defined(DEEPSTREAM_HLS_CONTROLLED_MPV_TEST))
+  return; // controlled test only: keep pre-init isolation
+#endif
   if (!m_mpv) return;
 
   QString otherConfiguration = SettingsComponent::Get().value(SETTINGS_SECTION_OTHER, "other_conf").toString();
@@ -1617,6 +2045,10 @@ void PlayerComponent::updateConfiguration()
 /////////////////////////////////////////////////////////////////////////////////////////
 void PlayerComponent::userCommand(QString command)
 {
+  emit playbackOwnerChangeRequested();
+#if defined(Q_OS_MAC) && (defined(DEEPSTREAM_EXPERIMENTAL_AV_FIXTURE) || defined(DEEPSTREAM_HLS_CONTROLLED_MPV_TEST))
+  Q_UNUSED(command);return; // controlled test only: no untracked mpv commands
+#endif
   QByteArray cmdUtf8 = command.toUtf8();
   mpv_command_string(m_mpv->mpv(), cmdUtf8.data());
 }
@@ -1757,3 +2189,694 @@ QString PlayerComponent::getCurrentWebPlaylistItemId() const
 {
   return m_currentWebPlaylistItemId;
 }
+
+// The local PCM effect owns only @deepstream-enhancement. Other filters remain untouched.
+#include "PlayerComponentAudioEnhancement.inc"
+
+#ifdef Q_OS_MAC
+quint32 PlayerComponent::defaultAudioOutputDevice()
+{
+  AudioObjectPropertyAddress address{kAudioHardwarePropertyDefaultOutputDevice,
+                                     kAudioObjectPropertyScopeGlobal,
+                                     kAudioObjectPropertyElementMain};
+  AudioDeviceID device = kAudioObjectUnknown;
+  UInt32 size = sizeof(device);
+  return AudioObjectGetPropertyData(kAudioObjectSystemObject, &address, 0, nullptr, &size, &device) == noErr
+      ? static_cast<quint32>(device) : 0;
+}
+#endif
+
+qint64 PlayerComponent::currentPlayingEntryId() const
+{
+  if (!m_mpv) return -1;
+  bool ok = false;
+  const qint64 position = m_mpv->getProperty("playlist-playing-pos").toLongLong(&ok);
+  if (!ok || position < 0) return -1;
+  const qint64 id = m_mpv->getProperty(QStringLiteral("playlist/%1/id").arg(position)).toLongLong(&ok);
+  return ok && id >= 0 ? id : -1;
+}
+
+QString PlayerComponent::audioEnhancementRouteBlockReason() const
+{
+  if (!m_mpv || !m_inPlayback || !m_audioEnhancementSession.ready() ||
+      currentPlayingEntryId() != m_audioEnhancementSession.activeEntry())
+    return QStringLiteral("awaiting_audio");
+  if (!m_audioEnhancementPlanFresh)
+    return QStringLiteral("awaiting_audio_selection");
+  if (m_doAc3Transcoding || !m_passthroughCodecs.isEmpty())
+    return QStringLiteral("passthrough_configured");
+#ifdef Q_OS_MAC
+  if (!m_audioOutputDevice) return QStringLiteral("output_unconfirmed");
+#endif
+  const QString ao = m_mpv->getProperty("current-ao").toString().toLower();
+  if (ao == QStringLiteral("avfoundation")) return QStringLiteral("spatial_route");
+  if (ao != QStringLiteral("coreaudio")) return QStringLiteral("output_unconfirmed");
+  const QString codec = m_mpv->getProperty("audio-codec-name").toString().toLower();
+  if (codec.isEmpty()) return QStringLiteral("output_unconfirmed");
+  // libmpv's codec name alone cannot disprove embedded object metadata.
+  if (codec.contains("truehd") || codec.contains("eac3") || codec.contains("e-ac-3") ||
+      codec.contains("dts") || codec == QStringLiteral("dca") || codec == QStringLiteral("mlp"))
+    return QStringLiteral("object_unconfirmed");
+  static const QSet<QString> pcmFormats = {QStringLiteral("u8"), QStringLiteral("u8p"),
+      QStringLiteral("s16"), QStringLiteral("s16p"), QStringLiteral("s32"), QStringLiteral("s32p"),
+      QStringLiteral("float"), QStringLiteral("floatp"), QStringLiteral("double"), QStringLiteral("doublep")};
+  const QVariantMap decoded = m_mpv->getProperty("audio-params").toMap();
+  const QVariantMap output = m_mpv->getProperty("audio-out-params").toMap();
+  if (!pcmFormats.contains(decoded.value("format").toString().toLower()) ||
+      !pcmFormats.contains(output.value("format").toString().toLower()) ||
+      decoded.value("channel-count").toInt() <= 0 || output.value("channel-count").toInt() <= 0)
+    return QStringLiteral("output_unconfirmed");
+  return {};
+}
+
+bool PlayerComponent::removeAudioEnhancementAtBoundary()
+{
+  if (removeAudioEnhancementFilter()) {
+    m_audioEnhancementBoundaryFailed = false;
+    return true;
+  }
+  m_audioEnhancementBoundaryFailed = true;
+  m_audioEnhancementReason = QStringLiteral("filter_remove_failed");
+  return false;
+}
+
+void PlayerComponent::invalidateAudioEnhancementRoute()
+{
+  if (!m_audioEnhancementSession.matches(m_audioEnhancementSession.active())) return;
+  m_audioEnhancementSession.changingTrack();
+  if (!removeAudioEnhancementAtBoundary()) {
+    if (m_mpv) m_mpv->command(QStringList() << "stop");
+    return;
+  }
+  m_audioEnhancementReason = QStringLiteral("awaiting_audio");
+}
+
+void PlayerComponent::refreshAudioEnhancement()
+{
+  if (!m_audioEnhancement.value("enabled").toBool()) return;
+  const QString blocked = audioEnhancementRouteBlockReason();
+  if (!blocked.isEmpty()) {
+    if (!removeAudioEnhancementAtBoundary()) {
+      if (m_mpv) m_mpv->command(QStringList() << "stop");
+      return;
+    }
+    m_audioEnhancementReason = blocked;
+    return;
+  }
+  // Our own af-add causes another AUDIO_RECONFIG; don't remove/re-add in a loop.
+  if (m_audioEnhancementActive && hasAudioEnhancementFilter()) return;
+  applyAudioEnhancement();
+  if (m_audioEnhancementReason == QStringLiteral("filter_remove_failed") && m_mpv)
+    m_mpv->command(QStringList() << "stop");
+}
+
+QVariantMap PlayerComponent::scopedAudioEnhancementStatus(const QString& session, bool accepted) const
+{
+  QVariantMap status = accepted ? getAudioEnhancementStatus() : QVariantMap{};
+  status.insert("session", session.left(128));
+  status.insert("accepted", accepted);
+  if (!accepted) {
+    status.insert("state", QStringLiteral("bypass"));
+    status.insert("reason", QStringLiteral("stale_session"));
+    status.insert("active", false);
+    status.insert("verified", false);
+  }
+  return status;
+}
+
+QVariantMap PlayerComponent::getAudioEnhancementStatusForSession(const QString& session) const
+{
+  return scopedAudioEnhancementStatus(session, m_audioEnhancementSession.matches(session.toStdString()));
+}
+
+QVariantMap PlayerComponent::setAudioEnhancementForSession(const QString& session, const QVariantMap& settings)
+{
+  const bool accepted = m_audioEnhancementSession.matches(session.toStdString());
+  if (!accepted) return scopedAudioEnhancementStatus(session, false);
+  m_audioEnhancementPlanFresh = true;
+  setAudioEnhancement(settings);
+  if (m_audioEnhancementReason == QStringLiteral("filter_remove_failed") && m_mpv)
+    m_mpv->command(QStringList() << "stop");
+  return scopedAudioEnhancementStatus(session, true);
+}
+#if defined(Q_OS_MAC) && defined(DEEPSTREAM_HAS_NATIVE_AV_BACKEND)
+
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+bool PlayerComponent::nativeAudioHlsRouteAllowed(bool videoRoute) const
+{
+  auto& settings=SettingsComponent::Get();QVariantMap audio;
+  for(const QString& key : {QStringLiteral("spatialAudio"),QStringLiteral("devicetype"),QStringLiteral("device"),QStringLiteral("channels"),QStringLiteral("exclusive")})
+    audio.insert(key,settings.value(SETTINGS_SECTION_AUDIO,key));
+  return NativeAudioHlsRoute::allowed(audio,settings.value(SETTINGS_SECTION_OTHER,"other_conf").toString(),!videoRoute);
+}
+QString PlayerComponent::bindNativeAudioSession(const QVariantMap& request)
+{
+  clearNativeAudioSession();
+  const QString contract=request.value(QStringLiteral("contract")).toString();
+  bool videoRoute=false;
+#ifdef DEEPSTREAM_EXPERIMENTAL_DOLBY_VISION_HLS
+  videoRoute=contract==QStringLiteral("deepstream-video-hls-v1");
+#ifdef DEEPSTREAM_EXPERIMENTAL_DOLBY_VISION_AUDIO_V2
+  videoRoute=videoRoute || contract==QStringLiteral("deepstream-video-hls-v2");
+#endif
+#endif
+  if((!videoRoute && !contract.isEmpty() && contract!=QStringLiteral("deepstream-audio-hls-v1")) ||
+     !m_mpv || !m_mpv->fixtureIsolationConfirmed() || !m_nativeHlsSession || !nativeAudioHlsRouteAllowed(videoRoute))return {};
+  return m_nativeHlsSession->bind(request);
+}
+void PlayerComponent::clearNativeAudioSession()
+{
+  if(m_nativeHlsSession)m_nativeHlsSession->clear();
+  const bool stopNative=m_nativeAudioHls && m_avFixturePhase!=AVFixturePhase::Idle;
+  const bool stopFallback=m_nativeFallbackRelay && (m_inPlayback || m_avFixtureMpvLoadPending);
+  m_nativeFallbackRelay.reset();
+  if(stopNative||stopFallback)stop();
+}
+#endif
+
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+bool PlayerComponent::startNativeAudioHls(const QString& url,const QVariantMap& options,const QVariantMap& metadata,
+                                          const QVariant& audio,const QVariant& subtitle)
+{
+  const QVariantMap f=options.value(QStringLiteral("nativeAudioHls")).toMap();
+  const QString contract=f.value(QStringLiteral("contract")).toString();
+  bool videoRoute=false;
+  bool videoV2=false;
+#ifdef DEEPSTREAM_EXPERIMENTAL_DOLBY_VISION_HLS
+  videoRoute=contract==QStringLiteral("deepstream-video-hls-v1");
+#ifdef DEEPSTREAM_EXPERIMENTAL_DOLBY_VISION_AUDIO_V2
+  videoV2=contract==QStringLiteral("deepstream-video-hls-v2");
+  videoRoute=videoRoute || videoV2;
+#endif
+#endif
+  if(f.value(QStringLiteral("enabled")).metaType().id()!=QMetaType::Bool || !f.value(QStringLiteral("enabled")).toBool() ||
+     (!videoRoute && contract!=QStringLiteral("deepstream-audio-hls-v1")) ||
+     f.value(QStringLiteral("sourceUrl")).toString()!=url || !m_nativeHlsSession || !m_mpv || !m_window ||
+     !m_mpv->fixtureIsolationConfirmed() || !nativeAudioHlsRouteAllowed(videoRoute))return false;
+  const QUrl source(url,QUrl::StrictMode);const QString binding=f.value(QStringLiteral("bindingId")).toString();
+  if(!m_nativeHlsSession->permits(binding,source))return false;
+  bool audioOk=false,subtitleOk=false;const int ai=audio.toInt(&audioOk),si=subtitle.toInt(&subtitleOk);
+  const QVariantMap selected=f.value(QStringLiteral("selection")).toMap();bool streamOk=false;
+  const int stream=selected.value(QStringLiteral("audioStreamIndex")).toInt(&streamOk);
+  const QString media=selected.value(QStringLiteral("mediaSourceId")).toString();
+  const QString spatial=selected.value(QStringLiteral("spatial")).toString();
+  const QString playSession=f.value(QStringLiteral("playSessionId")).toString();
+  const QString expectedCodec=selected.value(QStringLiteral("codec")).toString().toLower();
+  const int selectedChannels=selected.value(QStringLiteral("channels")).toInt();
+  int expectedChannels=0;
+  if(videoV2){
+#ifdef DEEPSTREAM_EXPERIMENTAL_DOLBY_VISION_AUDIO_V2
+    const QVariant channelValue=selected.value(QStringLiteral("channels"));
+    bool integerOk=false,numberOk=false;
+    const int channels=channelValue.toInt(&integerOk);const double number=channelValue.toDouble(&numberOk);
+    if(channelValue.metaType().id()==QMetaType::Bool || !integerOk || !numberOk ||
+       number!=double(channels) || !NativeHlsAudioCodecPolicy::permitted(expectedCodec.toStdString(),channels))return false;
+    expectedChannels=channels;
+#else
+    return false;
+#endif
+  }
+  const bool allowedCodec=videoV2 || (videoRoute ? (expectedCodec==QStringLiteral("aac") || expectedCodec==QStringLiteral("eac3")) : expectedCodec==QStringLiteral("eac3"));
+  if(!audioOk||ai!=1||!subtitleOk||si!=-1||!streamOk||stream<0||media.isEmpty()||playSession.isEmpty()||
+     !allowedCodec ||
+     (videoRoute && !videoV2 && (selectedChannels<1 || selectedChannels>(expectedCodec==QStringLiteral("aac") ? 2 : 8))) ||
+     (spatial!=QStringLiteral("joc") && spatial!=QStringLiteral("unknown")))return false;
+  const auto query=QUrlQuery(source).queryItems(QUrl::FullyDecoded);
+  auto unique=[&](const QString& name,const QString& value){int count=0;QString found;
+    for(const auto& pair:query)if(pair.first.compare(name,Qt::CaseInsensitive)==0){++count;found=pair.second;}
+    return count==1 && found.compare(value,Qt::CaseInsensitive)==0;
+  };
+  if(!unique(QStringLiteral("AudioCodec"),expectedCodec)||
+     !unique(QStringLiteral("AllowAudioStreamCopy"),QStringLiteral("true"))||
+     !unique(QStringLiteral("AudioStreamIndex"),QString::number(stream))||
+     !unique(QStringLiteral("MediaSourceId"),media)||!unique(QStringLiteral("PlaySessionId"),playSession))return false;
+  if(videoV2 && (!unique(QStringLiteral("VideoCodec"),QStringLiteral("hevc")) ||
+                 !unique(QStringLiteral("AllowVideoStreamCopy"),QStringLiteral("true"))))return false;
+  m_nativeAudioHls=true;m_nativeVideoHls=videoRoute;m_nativeAudioHlsCodec=expectedCodec;m_nativeAudioHlsBindingId=binding;
+  m_nativeAudioHlsExpectedChannels=expectedChannels;
+  m_avFixtureUrl=url;m_avFixtureOptions=options;m_avFixtureMetadata=metadata;m_avFixtureAudio=audio;m_avFixtureSubtitle=subtitle;
+  m_avFixtureAutoplay=options.value(QStringLiteral("autoplay")).toBool();
+  m_avFixtureSeek=qMax<qint64>(0,options.value(QStringLiteral("startMilliseconds")).toLongLong());
+  m_avFixturePhase=AVFixturePhase::Hashing;++m_avFixtureEpoch;beginAVFixtureDrain();return true;
+}
+#endif
+
+bool PlayerComponent::startAVFixture(const QString& url, const QVariantMap& options, const QVariantMap& metadata,
+                                     const QVariant& audio, const QVariant& subtitle)
+{
+#ifndef DEEPSTREAM_EXPERIMENTAL_AV_FIXTURE
+  Q_UNUSED(url);Q_UNUSED(options);Q_UNUSED(metadata);Q_UNUSED(audio);Q_UNUSED(subtitle);
+  return false;
+#else
+  const QVariantMap f = options.value("experimentalAv").toMap();
+  if (f.value("enabled").metaType().id() != QMetaType::Bool || !f.value("enabled").toBool() || !m_mpv || !m_window)
+    return false;
+  const QString digest = QStringLiteral("70a29e4e5a56e79127db3820b98ce74a79e52e780beb57ff99eb5f90b428cc9e");
+  const QUrl source(url);
+  bool aok=false, sok=false;
+  const int ai=audio.toInt(&aok), si=subtitle.toInt(&sok);
+  if (f.value("fixture").toString() != "public-apple-joc-v1" || f.value("sourceUrl").toString() != url ||
+      f.value("sourceSha256").toString() != digest || f.value("audioSelection").toString() != "single-joc" ||
+      f.value("subtitles").toString() != "off" || f.value("transport").toString() != "public-loopback-fixture" ||
+      source.scheme() != "http" || source.host() != "127.0.0.1" || source.port() < 1024 ||
+      source.port() > 65535 || source.path() != "/single-joc-master.m3u8" || source.hasQuery() ||
+      source.hasFragment() || !source.userInfo().isEmpty() || !aok || ai != 1 || !sok || si != -1 ||
+      metadata.value("headers").metaType().id()!=QMetaType::QVariantMap ||
+      !metadata.value("headers").toMap().isEmpty()) return false;
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  m_nativeAudioHls=false;m_nativeVideoHls=false;m_nativeAudioHlsBindingId.clear();m_nativeAudioHlsCodec.clear();m_nativeAudioHlsExpectedChannels=0;
+#endif
+  m_avFixtureUrl=url; m_avFixtureOptions=options; m_avFixtureMetadata=metadata;
+  m_avFixtureAudio=audio; m_avFixtureSubtitle=subtitle;
+  m_avFixtureAutoplay=options.value("autoplay").toBool();
+  m_avFixtureSeek=qMax<qint64>(0,options.value("startMilliseconds").toLongLong());
+  m_avFixturePhase=AVFixturePhase::Hashing;
+  const quint64 epoch=++m_avFixtureEpoch;
+  QNetworkRequest req(source);
+  req.setAttribute(QNetworkRequest::RedirectPolicyAttribute,QNetworkRequest::ManualRedirectPolicy);
+  req.setTransferTimeout(4000);
+  QNetworkReply* reply=m_avFixtureNetwork.get(req);m_avFixtureReply=reply;
+  connect(reply,&QNetworkReply::readyRead,this,[reply]{if(reply->bytesAvailable()>16384)reply->abort();});
+  connect(reply,&QNetworkReply::finished,this,[this,reply,epoch,digest]{
+    const bool current=epoch==m_avFixtureEpoch && m_avFixturePhase==AVFixturePhase::Hashing;
+    const int status=reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
+    const QByteArray body=reply->readAll();
+    const bool ok=reply->error()==QNetworkReply::NoError && status==200 && body.size()<=16384 &&
+       QCryptographicHash::hash(body,QCryptographicHash::Sha256).toHex()==digest.toLatin1();
+    reply->deleteLater();if(m_avFixtureReply==reply)m_avFixtureReply=nullptr;
+    if(!current)return;
+    if(!ok){failAVFixture(QStringLiteral("fixture_hash_or_http_failed"));return;}
+    beginAVFixtureDrain();
+  });
+  return true;
+#endif
+}
+
+void PlayerComponent::setAVFixtureVideoVisible(bool visible)
+{
+#ifdef DEEPSTREAM_HLS_CONTROLLED_MPV_TEST
+  Q_UNUSED(visible);
+  return; // separate native player window leaves WebEngine composition intact
+#endif
+  if (!m_window) return;
+  const bool previousActive = avFixtureVideoActive();
+  const auto revision=m_avFixtureLoads.revision();
+  if (!visible && !m_avFixtureWindowColorSaved) {
+    m_avFixturePreviousWindowColor=m_window->color();m_avFixtureWindowColorSaved=true;
+    m_window->setColor(Qt::transparent);
+    if(revision!=m_avFixtureLoads.revision())return;
+  }
+  if (QQuickItem* video=m_window->findChild<QQuickItem*>("video")) {
+    if (!visible && !m_avFixtureVideoVisibilitySaved) {
+      m_avFixturePreviousVideoVisible=video->isVisible();m_avFixtureVideoVisibilitySaved=true;video->setVisible(false);
+      if(revision!=m_avFixtureLoads.revision())return;
+    } else if (visible && m_avFixtureVideoVisibilitySaved) {
+      m_avFixtureVideoVisibilitySaved=false;video->setVisible(m_avFixturePreviousVideoVisible);
+      if(revision!=m_avFixtureLoads.revision())return;
+    }
+  }
+  if (visible && m_avFixtureWindowColorSaved) {
+    m_avFixtureWindowColorSaved=false;m_window->setColor(m_avFixturePreviousWindowColor);
+    if(revision!=m_avFixtureLoads.revision())return;
+  }
+  if (previousActive != avFixtureVideoActive()) emit avFixtureVideoActiveChanged();
+}
+
+void PlayerComponent::setAVFixtureState(State state)
+{
+  if(state==m_state)return;
+  const State old=m_state;m_state=state;
+  const auto revision=m_avFixtureLoads.revision();
+  switch(state) {
+  case State::playing: emit playing(); break;
+  case State::paused: emit paused(); break;
+  case State::buffering: emit buffering(0); break;
+  case State::finished: emit finished();if(revision!=m_avFixtureLoads.revision())return;emit stopped();break;
+  case State::canceled: emit canceled();if(revision!=m_avFixtureLoads.revision())return;emit stopped();break;
+  case State::error: break;
+  }
+  if(revision==m_avFixtureLoads.revision())emit stateChanged(state,old);
+}
+
+void PlayerComponent::beginAVFixtureDrain()
+{
+  if(m_avFixturePhase!=AVFixturePhase::Hashing || !m_mpv)return;
+  const QVariant posValue=m_mpv->getProperty("playlist-playing-pos");
+  bool ok=false;const qint64 pos=posValue.toLongLong(&ok);
+  if(posValue.metaType().id()!=QMetaType::LongLong)ok=false;
+  if(!ok || (pos<0 && (m_inPlayback || m_audioEnhancementSession.pending()))) {fallbackAVFixture();return;}
+  std::optional<qint64> entry;
+  if(pos>=0) {const qint64 id=currentPlayingEntryId();if(id<0){fallbackAVFixture();return;}entry=id;}
+  // Test-only pre-initialization isolation rules out untracked scripts, config and IPC.
+  // All app loadfile requests are tracked; userCommand and config reloads are disabled.
+  const QVariant playlist=m_mpv->getProperty("playlist");
+  m_avFixtureMpvIsolated=m_mpv->fixtureIsolationConfirmed();
+  if(!m_avFixtureMpvIsolated || m_avFixtureMpvLoadPending || playlist.metaType().id()!=QMetaType::QVariantList ||
+      playlist.toList().size()>(entry ? 1 : 0)){fallbackAVFixture();return;}
+  // Never unmute a new output when the currently selected volume/mute state is unknown.
+  const QVariant volumeValue=m_mpv->getProperty("volume"),muteValue=m_mpv->getProperty("mute");
+  bool volumeOk=false;const double volume=volumeValue.toDouble(&volumeOk);
+  if(volumeOk && qIsFinite(volume) && volume>=0 && volume<=100 && muteValue.metaType().id()==QMetaType::Bool) {
+    m_avFixtureVolume=qRound(volume);m_avFixtureMuted=muteValue.toBool();
+  } else {m_avFixtureVolume=0;m_avFixtureMuted=true;}
+  const QVariant speedValue=m_mpv->getProperty("speed");bool speedOk=false;const double speed=speedValue.toDouble(&speedOk);
+  m_avFixtureRate=(speedOk && qIsFinite(speed) && speed>=0.25 && speed<=4.0)?qRound(speed*1000.0):1000;
+  m_avFixturePreviousGapless=m_mpv->getProperty("gapless-audio");
+  if (!m_avFixturePreviousGapless.isValid() || m_avFixturePreviousGapless.metaType().id()==qMetaTypeId<ErrorReturn>()) {fallbackAVFixture();return;}
+  if (m_mpv->setProperty("gapless-audio",QStringLiteral("no")) < 0) {fallbackAVFixture();return;}
+  m_avFixtureGaplessSaved=true;
+  const auto d=m_avFixtureCoordinator.start(true);
+  if(d.action!=ExperimentalBackendCoordinator::Action::StopMpv){fallbackAVFixture();return;}
+  m_avFixtureGeneration=d.generation;m_avFixtureCancelRequested=false;
+  m_avFixtureDrainTicket=m_avFixtureLoads.beginDrain();
+  if(!m_avFixtureDrainTicket){failAVFixture(QStringLiteral("fixture_drain_gate_failed"));return;}
+  m_avFixtureFence.arm(d.generation,entry,true);
+  m_avFixturePhase=AVFixturePhase::Draining;m_suppressMpvDuringDeferredHash=false;
+  m_audioEnhancementSession.stop();m_audioEnhancementPlanFresh=false;m_pendingAudioEnhancement.clear();
+  m_audioOutputMonitorTimer.stop();
+  if(!removeAudioEnhancementAtBoundary()){failAVFixture(QStringLiteral("fixture_audio_cleanup_failed"));return;}
+  const QVariant cleared=m_mpv->command(QStringList()<<"playlist-clear");
+  const QVariant stopped=m_mpv->command(QStringList()<<"stop");
+  m_avFixtureStopAccepted=cleared.metaType().id()!=qMetaTypeId<ErrorReturn>() && stopped.metaType().id()!=qMetaTypeId<ErrorReturn>();
+  if(!m_avFixtureStopAccepted){failAVFixture(QStringLiteral("fixture_mpv_stop_failed"));return;}
+  setAVFixtureState(State::buffering);
+  m_avFixtureTimeout.setSingleShot(true);m_avFixtureTimeout.start(7000);
+  emit onMpvEvents();
+}
+
+void PlayerComponent::advanceAVFixtureDrain()
+{
+  if(m_avFixturePhase!=AVFixturePhase::Draining || !m_mpv)return;
+  QVariant idle=m_mpv->getProperty("core-idle"),pos=m_mpv->getProperty("playlist-playing-pos");
+  bool posOk=false;const qint64 p=pos.toLongLong(&posOk);
+  if(pos.metaType().id()!=QMetaType::LongLong)posOk=false;
+  MpvStopFence::Snapshot snapshot;
+  snapshot.commandAccepted=m_avFixtureStopAccepted;
+  snapshot.coreIdleKnown=idle.metaType().id()==QMetaType::Bool;snapshot.coreIdle=idle.toBool();
+  snapshot.playingPositionKnown=posOk;snapshot.playingPosition=p;
+  snapshot.queueDrained=true;snapshot.noPendingLoads=m_avFixtureMpvIsolated && !m_avFixtureMpvLoadPending;
+  // mpv reports current-ao as unavailable after the AO is detached. This
+  // verifies only mpv state, never physical hardware-buffer release.
+  const QVariant currentAO=m_mpv->getProperty("current-ao");
+  if(currentAO.metaType().id()==qMetaTypeId<ErrorReturn>()) {
+    snapshot.audioOutputKnown=currentAO.value<ErrorReturn>().error==MPV_ERROR_PROPERTY_UNAVAILABLE;
+    snapshot.audioOutputInactive=snapshot.audioOutputKnown;
+  } else if(currentAO.metaType().id()==QMetaType::QString) {
+    snapshot.audioOutputKnown=true;snapshot.audioOutputInactive=currentAO.toString().isEmpty();
+  }
+  if(m_avFixtureFence.state()==MpvStopFence::State::Failed){failAVFixture(QStringLiteral("fixture_mpv_boundary_failed"));return;}
+  if(!m_avFixtureFence.check(m_avFixtureGeneration,snapshot))return;
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  m_nativeFallbackRelay.reset();
+#endif
+  // Hold gapless-audio=no throughout AV playback; the normal value is restored
+  // on cancel, fallback, failure, or AV close before mpv is started again.
+  if(m_avFixtureCancelRequested){
+    if(!restoreAVFixtureGapless()){failAVFixture(QStringLiteral("fixture_gapless_restore_failed"));return;}
+    const auto stop=m_avFixtureCoordinator.stop();
+    if(stop.action!=ExperimentalBackendCoordinator::Action::StopMpv ||
+       m_avFixtureCoordinator.mpvStopped(stop.generation,true).action!=ExperimentalBackendCoordinator::Action::None ||
+       m_avFixtureCoordinator.state()!=ExperimentalBackendCoordinator::State::Idle) {
+      failAVFixture(QStringLiteral("fixture_stop_transition_failed"));return;
+    }
+    // Keep the gate in Draining while visibility notifications run, so a
+    // reentrant control or new load still targets the pending request.
+    setAVFixtureVideoVisible(true);
+    const auto deferred=m_avFixtureLoads.finishDrain(m_avFixtureDrainTicket,true);
+    m_avFixtureDrainTicket=0;
+    if(deferred.disposition==DeferredLoadGate<AVFixtureLoadRequest>::DrainDisposition::Stale ||
+       deferred.disposition==DeferredLoadGate<AVFixtureLoadRequest>::DrainDisposition::Failed) {
+      failAVFixture(QStringLiteral("fixture_drain_gate_failed"));return;
+    }
+    m_inPlayback=false;m_playbackCanceled=true;m_playbackError.clear();
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+    m_nativeAudioHls=false;m_nativeVideoHls=false;m_nativeAudioHlsBindingId.clear();m_nativeAudioHlsCodec.clear();m_nativeAudioHlsExpectedChannels=0;
+#endif
+    m_avFixturePhase=AVFixturePhase::Idle;m_avFixtureTimeout.stop();
+    if(deferred.disposition==DeferredLoadGate<AVFixtureLoadRequest>::DrainDisposition::Load && deferred.request) {
+      const auto request=*deferred.request;const auto revision=deferred.revision;
+      if(!m_avFixtureLoads.isCurrent(revision) || m_avFixturePhase!=AVFixturePhase::Idle) return;
+      bool controlsApplied=m_mpv;
+      if(controlsApplied && request.volume) controlsApplied=m_mpv->setProperty("volume",*request.volume)>=0;
+      if(controlsApplied && request.rate) controlsApplied=m_mpv->setProperty("speed",*request.rate/1000.0)>=0;
+      if(controlsApplied && request.muted) controlsApplied=m_mpv->setProperty("mute",*request.muted)>=0;
+      if(!m_avFixtureLoads.isCurrent(revision))return;
+      m_suppressMpvDuringDeferredHash=true;
+      const bool accepted=controlsApplied && loadAccepted(request.url,request.options,request.metadata,request.audio,request.subtitle,revision);
+      if(m_avFixturePhase!=AVFixturePhase::Hashing)m_suppressMpvDuringDeferredHash=false;
+      if(!accepted && m_avFixtureLoads.isCurrent(revision)) emit error(QStringLiteral("fixture_deferred_load_failed"));
+    } else if(m_avFixtureLoads.revision()==deferred.revision) setAVFixtureState(State::canceled);
+    return;
+  }
+  const auto completed=m_avFixtureLoads.finishDrain(m_avFixtureDrainTicket,true);
+  m_avFixtureDrainTicket=0;
+  if(completed.disposition!=DeferredLoadGate<AVFixtureLoadRequest>::DrainDisposition::Nothing) {
+    failAVFixture(QStringLiteral("fixture_drain_gate_failed"));return;
+  }
+  const auto decision=m_avFixtureCoordinator.mpvStopped(m_avFixtureGeneration,true);
+  if(decision.action!=ExperimentalBackendCoordinator::Action::StartAv){failAVFixture(QStringLiteral("fixture_transition_failed"));return;}
+  m_inPlayback=false;m_avFixturePhase=AVFixturePhase::Starting;
+  m_avFixtureVideoReady=false;m_avFixtureSeekPending=false;m_avFixtureAudioPoll.stop();
+  m_avFixtureTimeout.start(7000);
+  if(!m_avFixtureBackend){
+    m_avFixtureBackend=std::make_unique<NativeAVBackend>();
+    m_avFixtureBackend->setOutputLease([this]{return m_avFixturePhase==AVFixturePhase::Starting;},[]{});
+    connect(m_avFixtureBackend.get(),&NativeAVBackend::videoReady,this,[this](quint64 id){
+      if(id!=m_avFixtureGeneration || m_avFixturePhase!=AVFixturePhase::Starting)return;
+      m_avFixtureVideoReady=true;
+      checkAVFixtureAudioSelection();
+      if(m_avFixturePhase==AVFixturePhase::Starting && !m_avFixtureSeekPending)m_avFixtureAudioPoll.start();
+    });
+    connect(m_avFixtureBackend.get(),&NativeAVBackend::seekFinished,this,[this](quint64 id,qint64 ms,bool ok){
+      if(id!=m_avFixtureGeneration || m_avFixturePhase!=AVFixturePhase::Starting || !m_avFixtureSeekPending)return;
+      if(!ok){qWarning() << "fixture_seek_failed";fallbackAVFixture();return;}
+      if(ms!=m_avFixtureSeek){m_avFixtureBackend->seek(id,m_avFixtureSeek);return;}
+      m_avFixtureSeekPending=false;
+      const auto d=m_avFixtureCoordinator.avStarted(id,true);
+      if(d.action!=ExperimentalBackendCoordinator::Action::None || !m_avFixtureCoordinator.accepts(ExperimentalBackendCoordinator::Backend::Av,id)){fallbackAVFixture();return;}
+      m_avFixtureTimeout.stop();m_avFixturePhase=AVFixturePhase::Active;
+      m_avFixtureBackend->setVolume(id,m_avFixtureVolume);m_avFixtureBackend->setRate(id,m_avFixtureRate);m_avFixtureBackend->setMuted(id,m_avFixtureMuted);
+      if(m_avFixtureAutoplay){m_avFixtureBackend->play(id);}
+      else {m_avFixtureBackend->pause(id);setAVFixtureState(State::paused);}
+    });
+    connect(m_avFixtureBackend.get(),&NativeAVBackend::positionChanged,this,[this](quint64 id,qint64 ms){
+      if(m_avFixturePhase!=AVFixturePhase::Active || !m_avFixtureCoordinator.accepts(ExperimentalBackendCoordinator::Backend::Av,id))return;
+      m_positionMs=ms;emit positionUpdate(quint64(qMax<qint64>(0,ms)));
+    });
+    connect(m_avFixtureBackend.get(),&NativeAVBackend::durationChanged,this,[this](quint64 id,qint64 ms){
+      if(id!=m_avFixtureGeneration || (m_avFixturePhase!=AVFixturePhase::Starting && m_avFixturePhase!=AVFixturePhase::Active))return;
+      m_durationMs=ms;emit updateDuration(ms);
+    });
+    connect(m_avFixtureBackend.get(),&NativeAVBackend::stateChanged,this,[this](quint64 id,const QString& state){
+      if(m_avFixturePhase!=AVFixturePhase::Active || !m_avFixtureCoordinator.accepts(ExperimentalBackendCoordinator::Backend::Av,id))return;
+      if(state=="playing")setAVFixtureState(State::playing);else if(state=="paused")setAVFixtureState(State::paused);else if(state=="buffering")setAVFixtureState(State::buffering);
+    });
+    connect(m_avFixtureBackend.get(),&NativeAVBackend::audioStateChanged,this,[this](quint64 id,int volume,bool muted){
+      if(m_avFixturePhase!=AVFixturePhase::Active || !m_avFixtureCoordinator.accepts(ExperimentalBackendCoordinator::Backend::Av,id))return;
+      m_avFixtureVolume=volume;m_avFixtureMuted=muted;
+      const QString token=m_avFixtureOptions.value(QStringLiteral("nativeControlToken")).toString();
+      if(QRegularExpression(QStringLiteral("^[0-9a-f]{32}$")).match(token).hasMatch())emit nativeAudioStateChanged(token,volume,muted);
+    });
+#ifdef DEEPSTREAM_HLS_CONTROLLED_MPV_TEST
+    connect(m_avFixtureBackend.get(),&NativeAVBackend::nativeWindowClosed,this,[this](quint64 id){
+      if(id!=m_avFixtureGeneration || (m_avFixturePhase!=AVFixturePhase::Starting && m_avFixturePhase!=AVFixturePhase::Active))return;
+      const QString token=m_avFixtureOptions.value(QStringLiteral("nativeControlToken")).toString();
+      stop();
+      if(id==m_avFixtureGeneration && m_avFixturePhase==AVFixturePhase::Idle && m_state==State::canceled && QRegularExpression(QStringLiteral("^[0-9a-f]{32}$")).match(token).hasMatch())emit nativeWindowStopped(token);
+    });
+#endif
+    connect(m_avFixtureBackend.get(),&NativeAVBackend::finished,this,[this](quint64 id){
+      if(m_avFixturePhase!=AVFixturePhase::Active || !m_avFixtureCoordinator.accepts(ExperimentalBackendCoordinator::Backend::Av,id))return;
+      const auto revision=m_avFixtureLoads.revision();
+      if(!cancelAVFixture(false) || revision!=m_avFixtureLoads.revision())return;
+      m_inPlayback=false;m_playbackCanceled=false;m_playbackError.clear();setAVFixtureState(State::finished);
+    });
+    connect(m_avFixtureBackend.get(),&NativeAVBackend::error,this,[this](quint64 id,const QString& reason){
+      if(id!=m_avFixtureGeneration)return;
+      if(m_avFixturePhase==AVFixturePhase::Starting){qWarning() << "fixture_av_start_failed";fallbackAVFixture();}
+      else if(m_avFixturePhase==AVFixturePhase::Active){
+        if(reason==QStringLiteral("native_hls_audio_changed"))failAVFixture(QStringLiteral("native_hls_audio_changed"));
+        else fallbackAVFixture();
+      }
+    });
+  }
+  const auto revision=m_avFixtureLoads.revision();const auto generation=m_avFixtureGeneration;
+  m_avFixtureBackend->setVideoWindow(m_window);setAVFixtureVideoVisible(false);
+  if(revision!=m_avFixtureLoads.revision() || generation!=m_avFixtureGeneration || m_avFixturePhase!=AVFixturePhase::Starting)return;
+  bool opened=false;
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  if(m_nativeAudioHls){
+    const QUrl source(m_avFixtureUrl,QUrl::StrictMode);
+    if(!m_nativeHlsSession||!m_nativeHlsSession->permits(m_nativeAudioHlsBindingId,source)){failAVFixture(QStringLiteral("native_hls_session_expired"));return;}
+    opened=m_avFixtureBackend->openAuthorizedHls(generation,source,m_nativeHlsSession->base(),m_nativeHlsSession->authorization(),m_nativeHlsSession->allowsLocalHttp(),true);
+  } else
+#endif
+    opened=m_avFixtureBackend->open(generation,QUrl(m_avFixtureUrl),true);
+  if(!opened){
+    if(revision==m_avFixtureLoads.revision() && generation==m_avFixtureGeneration && m_avFixturePhase==AVFixturePhase::Starting){qWarning() << "fixture_av_open_failed";fallbackAVFixture();}return;
+  }
+  if(revision!=m_avFixtureLoads.revision() || generation!=m_avFixtureGeneration || m_avFixturePhase!=AVFixturePhase::Starting)return;
+  m_avFixtureBackend->play(generation); // muted until source selection and video are checked
+}
+
+void PlayerComponent::checkAVFixtureAudioSelection()
+{
+  if(m_avFixturePhase!=AVFixturePhase::Starting || !m_avFixtureVideoReady ||
+     m_avFixtureSeekPending || !m_avFixtureBackend || m_avFixtureBackend->session()!=m_avFixtureGeneration)return;
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  if(m_nativeAudioHls){
+    const QString state=m_avFixtureBackend->authenticatedHlsAudioState(m_avFixtureGeneration,m_nativeAudioHlsCodec,m_nativeAudioHlsExpectedChannels);
+    if(state==QStringLiteral("pending"))return;
+    if(state!=m_nativeAudioHlsCodec+QStringLiteral("_verified")){fallbackAVFixture();return;}
+    m_avFixtureBackend->monitorAuthenticatedHlsAudio(m_avFixtureGeneration,m_nativeAudioHlsCodec,m_nativeAudioHlsExpectedChannels);
+  } else
+#endif
+    if(!m_avFixtureBackend->hasOneSelectedAudioOption(m_avFixtureGeneration))return;
+  m_avFixtureAudioPoll.stop();
+  // The short muted run exposes the image/audio choice; restore requested time before release.
+  m_avFixtureBackend->pause(m_avFixtureGeneration);m_avFixtureSeekPending=true;
+  m_avFixtureBackend->seek(m_avFixtureGeneration,m_avFixtureSeek);
+}
+
+void PlayerComponent::fallbackAVFixture()
+{
+  const auto phase=m_avFixturePhase;
+  if(phase!=AVFixturePhase::Hashing && phase!=AVFixturePhase::Starting && phase!=AVFixturePhase::Active)return;
+  bool captured=phase==AVFixturePhase::Starting;
+  if(phase==AVFixturePhase::Active){
+    const QVariantMap snapshot=m_avFixtureBackend?m_avFixtureBackend->failureSnapshot(m_avFixtureGeneration):QVariantMap{};
+    const QVariant position=snapshot.value(QStringLiteral("positionMs"));
+    const QVariant autoplay=snapshot.value(QStringLiteral("autoplay"));
+    const QVariant volume=snapshot.value(QStringLiteral("volume"));
+    const QVariant muted=snapshot.value(QStringLiteral("muted"));
+    bool okPos=false,okVolume=false;const qint64 ms=position.toLongLong(&okPos);const int level=volume.toInt(&okVolume);
+    if(!okPos||ms<0||!okVolume||level<0||level>100||autoplay.metaType().id()!=QMetaType::Bool||muted.metaType().id()!=QMetaType::Bool){failAVFixture(QStringLiteral("native_fallback_state_unavailable"));return;}
+    m_avFixtureSeek=ms;m_avFixtureAutoplay=autoplay.toBool();m_avFixtureVolume=level;m_avFixtureMuted=muted.toBool();captured=true;
+  }
+  const auto revision=m_avFixtureLoads.revision();
+  const auto generation=m_avFixtureGeneration;
+  const QString url=m_avFixtureUrl;QVariantMap options=m_avFixtureOptions;options.remove("experimentalAv");
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  const bool authenticatedFallback=m_nativeAudioHls;const QString fallbackBinding=m_nativeAudioHlsBindingId;
+  options.remove("nativeAudioHls");m_nativeAudioHls=false;m_nativeVideoHls=false;m_nativeAudioHlsBindingId.clear();m_nativeAudioHlsCodec.clear();m_nativeAudioHlsExpectedChannels=0;
+#endif
+  options.insert("startMilliseconds",m_avFixtureSeek);options.insert("autoplay",m_avFixtureAutoplay);
+  const QVariantMap metadata=m_avFixtureMetadata;const QVariant audio=m_avFixtureAudio,subtitle=m_avFixtureSubtitle;
+  if(phase==AVFixturePhase::Starting || phase==AVFixturePhase::Active){
+    auto d=m_avFixtureCoordinator.avFailed(m_avFixtureGeneration);
+    if(d.action!=ExperimentalBackendCoordinator::Action::CloseAv){failAVFixture(QStringLiteral("fixture_fallback_transition_failed"));return;}
+    if(m_avFixtureBackend)m_avFixtureBackend->close(m_avFixtureGeneration);
+    if(m_avFixtureCoordinator.avClosed(m_avFixtureGeneration,true).action!=ExperimentalBackendCoordinator::Action::StartMpv){failAVFixture(QStringLiteral("fixture_fallback_close_failed"));return;}
+    // No mpv start was issued yet. Confirm its actual idle state before
+    // returning the coordinator to Idle, so reentrant replacements are safe.
+    const QVariant idle=m_mpv ? m_mpv->getProperty("core-idle") : QVariant();
+    const QVariant pos=m_mpv ? m_mpv->getProperty("playlist-playing-pos") : QVariant();
+    bool ok=false;const qint64 position=pos.toLongLong(&ok);
+    const auto stopping=m_avFixtureCoordinator.stop();
+    const bool confirmed=stopping.action==ExperimentalBackendCoordinator::Action::StopMpv &&
+      idle.metaType().id()==QMetaType::Bool && idle.toBool() &&
+      pos.metaType().id()==QMetaType::LongLong && ok && position==-1 &&
+      m_avFixtureMpvIsolated && !m_avFixtureMpvLoadPending;
+    if(stopping.action!=ExperimentalBackendCoordinator::Action::StopMpv ||
+       m_avFixtureCoordinator.mpvStopped(stopping.generation,confirmed).action!=ExperimentalBackendCoordinator::Action::None ||
+       m_avFixtureCoordinator.state()!=ExperimentalBackendCoordinator::State::Idle) {
+      m_avFixtureLoads.failClosed();failAVFixture(QStringLiteral("fixture_fallback_stop_unconfirmed"));return;
+    }
+  }
+  ++m_avFixtureEpoch;m_avFixtureTimeout.stop();m_avFixtureAudioPoll.stop();m_avFixtureVideoReady=false;m_avFixtureSeekPending=false;
+  m_avFixturePhase=AVFixturePhase::Idle;m_suppressMpvDuringDeferredHash=false;
+  const bool restored=restoreAVFixtureGapless();
+  const auto restoredRevision=restored ? revision : m_avFixtureLoads.failClosed();
+  setAVFixtureVideoVisible(true);
+  if(restoredRevision!=m_avFixtureLoads.revision())return;
+  if(!restored){emit error(QStringLiteral("fixture_gapless_restore_failed"));return;}
+  if(captured && !restoreMpvAudioState()){emit error(QStringLiteral("native_audio_state_restore_failed"));return;}
+  bool loaded=false;
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  if(authenticatedFallback){
+    const QUrl source(url,QUrl::StrictMode);
+    if(!m_nativeHlsSession || !m_nativeHlsSession->permits(fallbackBinding,source)){
+      emit error(QStringLiteral("native_hls_session_expired"));return;
+    }
+    auto relay=std::make_unique<HlsSessionRelay>();
+    const QUrl local=relay->start(source,m_nativeHlsSession->base(),m_nativeHlsSession->authorization(),m_nativeHlsSession->allowsLocalHttp());
+    if(local.isValid()){
+      const QUrl trustedOrigin=source.adjusted(QUrl::RemovePath | QUrl::RemoveQuery | QUrl::RemoveFragment);
+      QScopedValueRollback<QUrl> metadataOrigin(m_nativeFallbackMetadataOrigin,trustedOrigin);
+      loaded=loadAccepted(local.toString(QUrl::FullyEncoded),options,metadata,audio,subtitle,revision);
+    }
+    if(revision!=m_avFixtureLoads.revision() || generation!=m_avFixtureGeneration)return;
+    if(loaded)m_nativeFallbackRelay=std::move(relay);
+  } else
+#endif
+    loaded=loadAccepted(url,options,metadata,audio,subtitle,revision);
+  if(revision!=m_avFixtureLoads.revision() || generation!=m_avFixtureGeneration)return;
+  if(!loaded)emit error(QStringLiteral("fixture_fallback_failed"));
+}
+
+bool PlayerComponent::snapshotNativeAudioState()
+{
+  if(!m_avFixtureBackend || m_avFixtureBackend->session()!=m_avFixtureGeneration)return false;
+  m_avFixtureVolume=m_avFixtureBackend->volume(m_avFixtureGeneration);
+  m_avFixtureMuted=m_avFixtureBackend->muted(m_avFixtureGeneration);
+  return true;
+}
+
+bool PlayerComponent::restoreMpvAudioState()
+{
+  if(!m_mpv || m_mpv->setProperty("mute",true)<0)return false;
+  if(m_mpv->setProperty("volume",m_avFixtureVolume)<0)return false;
+  if(m_mpv->setProperty("mute",m_avFixtureMuted)<0){m_mpv->setProperty("mute",true);return false;}
+  return true;
+}
+
+bool PlayerComponent::cancelAVFixture(bool userStop)
+{
+  const AVFixturePhase old=m_avFixturePhase;
+  const bool needsAudioRestore=(old==AVFixturePhase::Starting || old==AVFixturePhase::Active);
+  const bool captured=old==AVFixturePhase::Starting || (old==AVFixturePhase::Active && snapshotNativeAudioState());
+  const auto revision=m_avFixtureLoads.revision();
+  if(old==AVFixturePhase::Draining && m_avFixtureDrainTicket) {
+    m_avFixtureLoads.finishDrain(m_avFixtureDrainTicket,false);m_avFixtureDrainTicket=0;
+  }
+  ++m_avFixtureEpoch;m_avFixtureTimeout.stop();m_avFixtureAudioPoll.stop();m_avFixtureVideoReady=false;m_avFixtureSeekPending=false;
+  if(m_avFixtureReply){m_avFixtureReply->abort();m_avFixtureReply=nullptr;}
+  if(m_avFixtureBackend && (old==AVFixturePhase::Starting || old==AVFixturePhase::Active)){
+    m_avFixtureBackend->setMuted(m_avFixtureGeneration,true);m_avFixtureBackend->close(m_avFixtureGeneration);
+  }
+  if(old!=AVFixturePhase::Hashing && old!=AVFixturePhase::Idle){
+    const auto d=m_avFixtureCoordinator.stop();
+    if(d.action==ExperimentalBackendCoordinator::Action::CloseAv)m_avFixtureCoordinator.avClosed(d.generation,true);
+    else if(d.action==ExperimentalBackendCoordinator::Action::StopMpv)m_avFixtureCoordinator.mpvStopped(d.generation,false);
+  }
+  m_avFixturePhase=AVFixturePhase::Idle;m_suppressMpvDuringDeferredHash=false;
+  const bool restored=restoreAVFixtureGapless();
+  const auto restoredRevision=restored ? revision : m_avFixtureLoads.failClosed();
+  m_avFixtureUrl.clear();m_avFixtureOptions.clear();m_avFixtureMetadata.clear();
+#ifdef DEEPSTREAM_EXPERIMENTAL_AUDIO_HLS
+  m_nativeAudioHls=false;m_nativeVideoHls=false;m_nativeAudioHlsBindingId.clear();m_nativeAudioHlsCodec.clear();m_nativeAudioHlsExpectedChannels=0;
+#endif
+  setAVFixtureVideoVisible(true);
+  if(restoredRevision!=m_avFixtureLoads.revision())return false;
+  if(!restored){emit error(QStringLiteral("fixture_gapless_restore_failed"));return false;}
+  if(needsAudioRestore && !captured){if(m_mpv)m_mpv->setProperty("mute",true);emit error(QStringLiteral("native_audio_state_unavailable"));return false;}
+  if(needsAudioRestore && !restoreMpvAudioState()){emit error(QStringLiteral("native_audio_state_restore_failed"));return false;}
+  if(userStop && old!=AVFixturePhase::Hashing && old!=AVFixturePhase::Idle){m_inPlayback=false;m_playbackCanceled=true;m_playbackError.clear();setAVFixtureState(State::canceled);}
+  return restoredRevision==m_avFixtureLoads.revision();
+}
+
+bool PlayerComponent::restoreAVFixtureGapless()
+{
+  if(!m_avFixtureGaplessSaved)return true;
+  if(!m_mpv || m_mpv->setProperty("gapless-audio",m_avFixturePreviousGapless)<0)return false;
+  m_avFixtureGaplessSaved=false;m_avFixturePreviousGapless.clear();return true;
+}
+
+void PlayerComponent::failAVFixture(const QString& reason)
+{
+  const auto revision=m_avFixtureLoads.stop();
+  if(!cancelAVFixture(false) || revision!=m_avFixtureLoads.revision())return;
+  m_playbackError=reason;setAVFixtureState(State::error);
+  if(revision==m_avFixtureLoads.revision())emit error(reason);
+}
+#endif
