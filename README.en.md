@@ -42,7 +42,7 @@ Dolby Vision, HDR, object-based Dolby TrueHD/Atmos audio and opening local movie
 
 ## Downloads
 
-Downloads and release notes: [releases page](https://github.com/DGi-Solutions/deepstream-pro/releases). The macOS installer is intended for Apple Silicon and macOS 27.2 or later.
+Downloads and release notes: [releases page](https://github.com/DGi-Solutions/deepstream-pro/releases). The macOS installer is intended for Apple Silicon and macOS 27.2 or later. The app and installer are signed with an Apple Developer ID and notarised by Apple.
 
 ## Contributing and license
 
