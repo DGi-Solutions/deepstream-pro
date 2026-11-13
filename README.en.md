@@ -44,10 +44,6 @@ Dolby Vision, HDR, object-based Dolby TrueHD/Atmos audio and opening local movie
 
 Downloads and release notes: [releases page](https://github.com/DGi-Solutions/deepstream-pro/releases). The macOS installer is intended for Apple Silicon and macOS 27.2 or later.
 
-## Building
-
-The [build guide](dev/macos/README-deepstream.md) covers the required tools and dependencies (German).
-
 ## Contributing and license
 
 Contributions and bug reports are welcome: [CONTRIBUTING.md](CONTRIBUTING.md). Please keep private media, credentials, profiles and unfiltered logs out of public issues and pull requests.
